@@ -153,7 +153,11 @@ export class UI {
     this._toggle(this.inspectPanel, active);
   }
 
-  setJourney(active) { if(this.journey)this.journey.classList.toggle('hide',!active); }
+  setJourney(active, text) {
+    if (!this.journey) return;
+    if (text && this.journey.textContent !== text) this.journey.textContent = text;
+    this.journey.classList.toggle('hide', !active);
+  }
 
   toast(text, secs) {
     this.toastEl.textContent = text;

@@ -106,6 +106,7 @@ export class Story {
       waitTimer: 0,
       gagDone: false,
       gagT: -1,
+      hideT: 0,
       returnedOnce: false,
       offerT: -1,
       offered: false,
@@ -114,6 +115,10 @@ export class Story {
 
     this.star.position.copy(this.starGroundPos);
     this.star.rotation.set(0.15, 0.3, 0);
+    this.player.group.position.copy(this.p.pos);
+    this.player.group.rotation.y = this.p.yaw;
+    this.fox.group.position.copy(this.f.pos);
+    this.fox.group.rotation.y = this.f.yaw - Math.PI / 2;
     this.starScale = 1;
     this.star.scale.setScalar(1);
     this.pickupT = -1;
@@ -127,6 +132,7 @@ export class Story {
     this.camInit = false;
     this.pullbackT = -1;
     this.placeT = -1;
+    this.placeSpot = this.world.basePos.clone().add(new THREE.Vector3(0, 0, 2.15));
     this.letterT = -1;
     this.fadeT = -1;
     this.lampTimer = -1;
@@ -243,12 +249,9 @@ export class Story {
         break;
       case 'place':
         if (this.state === 'walk' && this.starState === 'carried' &&
-            this._progress(this.p.pos) > 0.86) {
-          this.state = 'placing';
-          this.starState = 'placing';
-          this.placeT = 0;
-          this.placeFrom = this.star.position.clone();
-          this.audio.placeStar();
+            this.p.pos.distanceTo(this.world.basePos) < 3.5) {
+          this.state = 'approach-base';
+          this.p.target = this.placeSpot.clone();
         }
         break;
     }
@@ -257,7 +260,7 @@ export class Story {
   _updatePlayer(dt) {
     const p = this.p;
     const SPEED = 1.45, STRIDE = 0.52;
-    if (p.target && this.state === 'walk') {
+    if (p.target && (this.state === 'walk' || this.state === 'approach-base')) {
       const dx = p.target.x - p.pos.x, dz = p.target.z - p.pos.z;
       const dist = Math.hypot(dx, dz);
       if (dist < 0.08) {
@@ -285,6 +288,14 @@ export class Story {
       p.moving = Math.max(0, p.moving - dt * 5);
       p.idleTime += dt;
     }
+    if (this.state === 'approach-base' && !p.target) {
+      this.state = 'placing';
+      this.starState = 'placing';
+      this.placeT = 0;
+      this.placeFrom = this.star.position.clone();
+      p.yaw = Math.atan2(this.world.basePos.x - p.pos.x, this.world.basePos.z - p.pos.z);
+      this.audio.placeStar();
+    }
     p.pos.y = this.world.heightAt(p.pos.x, p.pos.z);
     const g = this.player.group;
     g.position.copy(p.pos);
@@ -297,6 +308,12 @@ export class Story {
       arms.body.rotation.x=reach*.32;
       arms.armL.rotation.x=-reach*1.3;
       arms.armR.rotation.x=-reach*1.3;
+    } else if (this.state === 'placing') {
+      arms.body.rotation.x = .14 * THREE.MathUtils.smoothstep(this.placeT, .2, 1.2);
+      arms.armL.rotation.x = -.78;
+      arms.armR.rotation.x = -.78;
+      arms.armL.userData.elbow.rotation.x = -1.12;
+      arms.armR.userData.elbow.rotation.x = -1.12;
     } else {
       arms.body.rotation.x=0;
       if (this.starState==='inspect'||this.starState==='carried') {
@@ -359,6 +376,16 @@ export class Story {
       f.moving = Math.max(0, f.moving - dt * 5);
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
       if (this.p.moving > 0.5) f.mode = 'lead';
+    } else if (f.mode === 'hide') {
+      f.hideT += dt;
+      target = this.world.foxHidePos.clone();
+      speed = RUN * 1.72;
+      f.sitting = Math.max(0, f.sitting - dt * 8);
+      if (f.pos.distanceTo(target) < .24) {
+        f.mode = 'gag';
+        f.gagT = 0;
+        this.state = 'gag';
+      }
     } else if (f.mode === 'gag') {
       f.gagT += dt;
       f.sitting = Math.max(0, f.sitting - dt * 6);
@@ -418,12 +445,11 @@ export class Story {
       f.moving = Math.max(0, f.moving - dt * 6);
     }
 
-    // 雪落鼻尖桥段：玩家进度过 0.42 且未触发过
+    // 狐狸先冲到弯道雪堆后，再探头完成落雪表演。
     if (!f.gagDone && f.mode === 'lead' && this._progress(this.p.pos) > 0.445) {
       f.gagDone = true;
-      f.mode = 'gag';
-      f.gagT = 0;
-      this.state='gag';
+      f.mode = 'hide';
+      f.hideT = 0;
     }
 
     f.pos.y = this.world.heightAt(f.pos.x, f.pos.z);
@@ -432,7 +458,7 @@ export class Story {
     g.rotation.y = f.yaw - Math.PI / 2; // 模型朝 +x 建模
     this.fox.pose(f.phase, f.moving, f.sitting, this.time);
     const ball=this.fox.parts.snowball;
-    ball.visible = f.mode === 'gag' && f.gagT > .7 && f.gagT < 3.25;
+    ball.visible = f.mode === 'gag' && f.gagT > .45 && f.gagT < 3.25;
     for (const puff of this.fox.parts.snowPuffs) {
       const age = f.gagT - 1.75;
       puff.visible = f.mode === 'gag' && age > 0 && age < 3.55;
@@ -455,11 +481,24 @@ export class Story {
       this.fox.parts.headPivot.position.y = .42 - sniff * .09 + retreat * .09;
       this.fox.parts.headPivot.rotation.z = -.22 * sniff + .22 * retreat;
     } else if (f.mode==='gag') {
-      if (f.gagT<2.1) {
-        ball.position.y=.04+Math.max(0,1.5-f.gagT)*.6;
-        this.fox.parts.headPivot.rotation.z=.18*Math.sin(Math.min(f.gagT/2,1)*Math.PI);
-      } else if(f.gagT<3.65) this.fox.shakeHead((f.gagT-2.1)/1.55);
-      else this.fox.parts.headPivot.rotation.z=-.15;
+      const peek = THREE.MathUtils.smoothstep(f.gagT, 0, .72);
+      this.fox.parts.headPivot.position.y = .42 + peek * .12;
+      this.fox.parts.headPivot.rotation.y = Math.sin(f.gagT * 1.4) * .18 * (1 - peek);
+      if (f.gagT < 1.9) {
+        const drop = THREE.MathUtils.smoothstep(f.gagT, .45, 1.75);
+        ball.position.y = .04 + (1 - drop) * 1.05;
+        this.fox.parts.headPivot.rotation.z = .08 + Math.sin(drop * Math.PI) * .16;
+      } else if (f.gagT < 3.45) {
+        this.fox.shakeHead((f.gagT - 1.9) / 1.55);
+      } else if (f.gagT < 5.15) {
+        const joy = THREE.MathUtils.smoothstep(f.gagT, 3.25, 3.7) * (1 - THREE.MathUtils.smoothstep(f.gagT, 4.8, 5.15));
+        g.position.y += Math.abs(Math.sin((f.gagT - 3.25) * Math.PI * 1.8)) * .55 * joy;
+        g.rotation.z = Math.sin((f.gagT - 3.25) * Math.PI * 1.8) * .25 * joy;
+        this.fox.parts.tailPivot.rotation.y = Math.sin(f.gagT * 13) * .36;
+      } else {
+        this.fox.parts.headPivot.rotation.z = -.08;
+        this.fox.parts.tailPivot.rotation.y = Math.sin(f.gagT * 4) * .2;
+      }
     } else {
       this.fox.parts.headPivot.position.x = .3;
       this.fox.parts.headPivot.position.y = .42;
@@ -495,7 +534,7 @@ export class Story {
       s.rotation.x *= 1 - Math.min(1, 5 * dt);
     } else if (this.starState === 'placed') {
       L.intensity += (1.6 - L.intensity) * Math.min(1, 3 * dt);
-      s.position.y = this.world.baseTop.y + 0.12 + Math.sin(this.time * 1.5) * 0.05;
+      s.position.y = this.world.baseTop.y + 0.34 + Math.sin(this.time * 1.5) * 0.035;
       s.rotation.y=.5+Math.sin(this.time*.6)*.12;
     }
   }
@@ -522,14 +561,13 @@ export class Story {
     // 安放动画
     if (this.state === 'placing') {
       this.placeT += dt;
-      const k = Math.min(this.placeT / 1.4, 1);
-      const e = 1 - (1 - k) * (1 - k);
-      const to = this.world.baseTop.clone().add(new THREE.Vector3(0, 0.12, 0));
-      const mid = this.placeFrom.clone().lerp(to, e);
-      mid.y += Math.sin(e * Math.PI) * 0.9;
+      const k = THREE.MathUtils.smoothstep(this.placeT, .35, 2.15);
+      const to = this.world.baseTop.clone().add(new THREE.Vector3(0, .34, 0));
+      const mid = this.placeFrom.clone().lerp(to, k);
+      mid.y += Math.sin(k * Math.PI) * .42;
       this.star.position.copy(mid);
-      this.star.userData.light.intensity = 1.1 + e * 2.2;
-      if (k >= 1) {
+      this.star.userData.light.intensity = 1.1 + k * 2.2;
+      if (this.placeT >= 2.15) {
         this.starState = 'awakening';
         this.state = 'awakening';
         this.awakenT = 0;
@@ -591,11 +629,10 @@ export class Story {
       goalPos=center.clone().addScaledVector(side,5.35).add(new THREE.Vector3(0,2.15,0));
       goalLook=center.add(new THREE.Vector3(0,.92,0));
     } else if(this.state==='gag') {
-      const center=this.f.pos.clone().lerp(this.p.pos,.5);
       const axis=new THREE.Vector3().subVectors(this.f.pos,this.p.pos).setY(0).normalize();
       const side=new THREE.Vector3(-axis.z,0,axis.x);
-      goalPos=center.clone().addScaledVector(side,6.4).addScaledVector(axis,1.8).add(new THREE.Vector3(0,2.5,0));
-      goalLook=center.add(new THREE.Vector3(0,.62,0));
+      goalPos=this.f.pos.clone().addScaledVector(axis,-4.25).addScaledVector(side,1.25).add(new THREE.Vector3(0,1.65,0));
+      goalLook=this.f.pos.clone().add(new THREE.Vector3(0,.52,0));
     } else if(['placing','awakening'].includes(this.state) || (this.state==='finale' && this.pullbackT<0)) {
       goalPos=this.world.basePos.clone().add(new THREE.Vector3(3.4,2.5,8));
       goalLook=this.world.baseTop.clone().add(new THREE.Vector3(-.4,-.1,1.2));
@@ -612,11 +649,20 @@ export class Story {
       // 跟随：路径方向后上方，半固定
       const pr = Math.max(0.02, this._progress(this.p.pos));
       const tangent = this.world.path.curve.getTangentAt(Math.min(pr, 0.99));
-      const back = tangent.clone().multiplyScalar(-4.8);
-      back.y = 2.65;
-      back.x += 2.75;
-      goalPos = this.p.pos.clone().add(back);
-      goalLook = this.p.pos.clone().add(tangent.clone().multiplyScalar(2.4)).add(new THREE.Vector3(0, 0.78, 0));
+      if (pr < .13 && this.starState === 'ground') {
+        const center = this.p.pos.clone().lerp(this.starGroundPos, .46);
+        const back = tangent.clone().multiplyScalar(-5.1);
+        back.y = 2.45;
+        back.x += .55;
+        goalPos = center.clone().add(back);
+        goalLook = center.add(new THREE.Vector3(0, .62, 0));
+      } else {
+        const back = tangent.clone().multiplyScalar(-4.8);
+        back.y = 2.65;
+        back.x += 2.75;
+        goalPos = this.p.pos.clone().add(back);
+        goalLook = this.p.pos.clone().add(tangent.clone().multiplyScalar(2.4)).add(new THREE.Vector3(0, 0.78, 0));
+      }
     }
     const framing=THREE.MathUtils.clamp(.82/camera.aspect,1,1.7);
     goalPos.sub(goalLook).multiplyScalar(framing).add(goalLook);
@@ -635,14 +681,17 @@ export class Story {
   // —— UI 同步（每步调用，DOM 只在变化时写）——
   _syncUi() {
     const nearStar = this.starState === 'ground' && this.p.pos.distanceTo(this.starGroundPos) < 2.2;
-    const nearBase = this.starState === 'carried' && this._progress(this.p.pos) > 0.86;
+    const nearBase = this.starState === 'carried' && this.p.pos.distanceTo(this.world.basePos) < 2.65;
     if (!this.ui) return;
     this.ui.setPrompt(
       this.state === 'walk' && nearStar ? '拾起星星' :
       this.state === 'walk' && nearBase ? '安放星星' : null,
     );
     this.ui.setInspect(this.state === 'inspect', this.config, Math.abs(Math.sin(this.inspect.yaw/2))>.7);
-    this.ui.setJourney(this.state==='walk' && !nearStar && !nearBase && this.time >= this.toastUntil);
+    this.ui.setJourney(
+      this.state==='walk' && !nearStar && !nearBase && this.time >= this.toastUntil,
+      this.starState === 'ground' ? '轻点雪路，朝前方那团暖光走' : '轻点雪路，跟着小狐狸慢慢走',
+    );
     this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
   }
 }

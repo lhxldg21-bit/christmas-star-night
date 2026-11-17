@@ -432,6 +432,26 @@ function buildPathDetails(scene, world, heightAt, path) {
   log.position.y = heightAt(log.position.x, log.position.z) + .12;
   detail.add(log);
 
+  // A dedicated snowbank at the first bend gives the fox a readable place to
+  // disappear behind, peek out, and perform the nose-snow beat.
+  const hideP = path.curve.getPointAt(.43);
+  const hideT = path.curve.getTangentAt(.43).normalize();
+  const hideN = new THREE.Vector3(-hideT.z, 0, hideT.x);
+  const bankCenter = hideP.clone().addScaledVector(hideN, 2.05);
+  const bank = new THREE.Group();
+  for (const [side, sx, sy, sz] of [[-.48, .74, .4, .62], [.22, .92, .5, .72], [.72, .58, .34, .5]]) {
+    const lump = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), snowMat);
+    lump.position.set(side, sy * .33, (side * 1.7) % .7);
+    lump.scale.set(sx, sy, sz);
+    lump.castShadow = lump.receiveShadow = true;
+    bank.add(lump);
+  }
+  bank.position.set(bankCenter.x, heightAt(bankCenter.x, bankCenter.z) - .03, bankCenter.z);
+  bank.rotation.y = Math.atan2(hideT.x, hideT.z);
+  detail.add(bank);
+  world.foxHidePos = hideP.clone().addScaledVector(hideN, 2.95).addScaledVector(hideT, .22);
+  world.foxHidePos.y = heightAt(world.foxHidePos.x, world.foxHidePos.z);
+
   scene.add(detail);
   world.pathDetails = detail;
 }
@@ -549,6 +569,20 @@ function buildCourtyard(scene, world, heightAt) {
       const bar=new THREE.Mesh(new THREE.BoxGeometry(w,h,.04),houseMat);bar.position.set(wx,wy,1.74);house.add(bar);
     }
   }
+  // One restrained Christmas detail: a snow-dusted evergreen wreath on the door.
+  const wreath = new THREE.Group();
+  const wreathMat = mat(0x315449);
+  const wreathRing = new THREE.Mesh(new THREE.TorusGeometry(.3, .055, 6, 18), wreathMat);
+  const wreathSnow = new THREE.Mesh(new THREE.TorusGeometry(.305, .018, 5, 18), mat(PALETTE.snow));
+  wreathSnow.position.y = .055;
+  wreath.add(wreathRing, wreathSnow);
+  for (const angle of [-.75, -.25, .25, .75]) {
+    const berry = new THREE.Mesh(new THREE.SphereGeometry(.035, 6, 4), mat(PALETTE.berry));
+    berry.position.set(Math.sin(angle) * .3, Math.cos(angle) * .3, .055);
+    wreath.add(berry);
+  }
+  wreath.position.set(0, 1.38, 1.79);
+  house.add(wreath);
   house.position.set(-10, heightAt(-10, -39), -39);
   house.rotation.y = 0.35;
   g.add(house);

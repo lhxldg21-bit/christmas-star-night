@@ -181,6 +181,15 @@ export function buildFox() {
   const chest = new THREE.Mesh(new THREE.SphereGeometry(.13,8,6), cream);
   chest.scale.set(.6,1,.88);chest.position.set(0.2, 0.3, 0);
 
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(.135, .026, 6, 14),
+    mat(PALETTE.berry),
+  );
+  collar.rotation.y = Math.PI / 2;
+  collar.position.set(.15, .38, 0);
+  const bell = new THREE.Mesh(new THREE.SphereGeometry(.032, 7, 5), mat(0xd7b36c));
+  bell.position.set(.11, .245, 0);
+
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), rust);
@@ -235,7 +244,7 @@ export function buildFox() {
     legs.push(leg);
     g.add(leg);
   }
-  g.add(body, chest, headPivot, tailPivot);
+  g.add(body, chest, collar, bell, headPivot, tailPivot);
   return {
     group: g,
     parts: { body, headPivot, tailPivot, legs, nose, snowball, snowPuffs },
