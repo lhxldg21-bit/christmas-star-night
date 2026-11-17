@@ -16,6 +16,11 @@ const CAPTURE_MODE = params.get('capture') === '1';
 window.__CAPTURE_MODE__ = CAPTURE_MODE;
 const T_PARAM = params.get('t');
 const AUTO = CAPTURE_MODE || params.get('auto') === '1';
+const CAPTURE_WIDTH = CAPTURE_MODE ? Number(params.get('vw')) || 0 : 0;
+const CAPTURE_HEIGHT = CAPTURE_MODE ? Number(params.get('vh')) || 0 : 0;
+const FIXED_CAPTURE_VIEWPORT = CAPTURE_WIDTH > 0 && CAPTURE_HEIGHT > 0;
+const VIEW_WIDTH = FIXED_CAPTURE_VIEWPORT ? CAPTURE_WIDTH : innerWidth;
+const VIEW_HEIGHT = FIXED_CAPTURE_VIEWPORT ? CAPTURE_HEIGHT : innerHeight;
 
 const SEED = 20261225;
 function mulberry32(a) {
@@ -28,17 +33,28 @@ function mulberry32(a) {
 }
 const rand = mulberry32(SEED);
 
-const DURATION = 46; // 自动样片一整趟的时长（秒）
+const DURATION = 84; // 自动样片一整趟的时长（秒）
 
 const SKY = new THREE.Color(PALETTE.nightHorizon);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(FIXED_CAPTURE_VIEWPORT ? 1 : Math.min(devicePixelRatio, 2));
+renderer.setSize(VIEW_WIDTH, VIEW_HEIGHT);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
+if (FIXED_CAPTURE_VIEWPORT) {
+  document.documentElement.style.width = `${VIEW_WIDTH}px`;
+  document.documentElement.style.height = `${VIEW_HEIGHT}px`;
+  document.body.style.width = `${VIEW_WIDTH}px`;
+  document.body.style.height = `${VIEW_HEIGHT}px`;
+  renderer.domElement.style.position = 'absolute';
+  const uiRoot = document.getElementById('ui');
+  uiRoot.style.position = 'absolute';
+  uiRoot.style.width = `${VIEW_WIDTH}px`;
+  uiRoot.style.height = `${VIEW_HEIGHT}px`;
+}
 if (CAPTURE_MODE) {
   // 截图模式：DOM 状态必须是 t 的纯函数，墙钟动画/过渡一律关闭
   const st = document.createElement('style');
@@ -48,13 +64,13 @@ if (CAPTURE_MODE) {
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(PALETTE.nightTop);
-scene.fog = new THREE.Fog(SKY, 26, 110);
+scene.fog = new THREE.Fog(SKY, 18, 100);
 
-const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 420);
+const camera = new THREE.PerspectiveCamera(46, VIEW_WIDTH / VIEW_HEIGHT, 0.1, 420);
 
 // —— 灯光：冷月为主，琥珀点光为辅 ——
-scene.add(new THREE.HemisphereLight(0x8fa1d8, 0x2a2530, 0.75));
-const moonLight = new THREE.DirectionalLight(0xb9c8ff, 1.0);
+scene.add(new THREE.HemisphereLight(0x8fa1d8, 0x455768, 0.80));
+const moonLight = new THREE.DirectionalLight(0xb6d5ef, 0.85);
 moonLight.position.set(-18, 30, 12);
 moonLight.castShadow = true;
 moonLight.shadow.mapSize.set(2048, 2048);
@@ -63,9 +79,10 @@ moonLight.shadow.camera.right = 28;
 moonLight.shadow.camera.top = 28;
 moonLight.shadow.camera.bottom = -28;
 moonLight.shadow.camera.far = 80;
+moonLight.shadow.radius = 4;
 moonLight.shadow.bias = -0.0008;
 scene.add(moonLight);
-const fill = new THREE.DirectionalLight(0x6a76b8, 0.25);
+const fill = new THREE.DirectionalLight(0x9dbac6, 0.45);
 fill.position.set(12, 8, -16);
 scene.add(fill);
 
@@ -74,7 +91,7 @@ const world = buildWorld(scene, rand);
 const { config, source } = loadConfig();
 const player = buildPlayer();
 const fox = buildFox();
-fox.group.scale.setScalar(1.28); // 夜里雪地上要读得出同伴
+fox.group.scale.setScalar(1.3); // 夜里雪地上要读得出同伴
 const star = buildStar(config);
 scene.add(player.group, fox.group, star);
 
@@ -137,8 +154,11 @@ function simulate(t) {
 
 function draw() {
   renderer.render(scene, camera);
+  document.body.dataset.stage = story.state;
+  document.body.dataset.fox = story.f.mode;
+  document.body.dataset.gag = story.f.gagT.toFixed(2);
   window.__INFO__ = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
-  hud.style.display = paused ? 'none' : '';
+  hud.style.display = params.has('debug') && !paused ? '' : 'none';
   if (!paused) hud.textContent = `t ${storyClock.toFixed(1)}s · calls ${renderer.info.render.calls} · tris ${renderer.info.render.triangles}`;
 }
 
@@ -195,6 +215,7 @@ window.__restore = () => {
 };
 
 addEventListener('resize', () => {
+  if (FIXED_CAPTURE_VIEWPORT) return;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);

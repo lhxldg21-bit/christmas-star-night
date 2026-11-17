@@ -16,6 +16,7 @@ export class UI {
     this._buildControls();
     this._buildBadge(source);
     this._buildFade(auto);
+    this.journey=this._el('div','journey-hint hide',null,'轻点雪路，跟着小狐狸慢慢走');
   }
 
   _el(tag, cls, parent, html) {
@@ -31,7 +32,7 @@ export class UI {
     const box = this._el('div', 'cover-box', this.cover);
     this._el('div', 'cover-kicker', box, '一 份 冬 日 礼 物');
     this._el('h1', 'cover-title', box, `给 ${esc(this.config.toName)} 的<br>一场雪夜迎接`);
-    this._el('p', 'cover-sub', box, '有人托了一颗星星来接你。<br>路不长，跟着它走就好。');
+    this._el('p', 'cover-sub', box, '有人托小狐狸，带来一颗星星。<br>沿着雪路，有一盏灯在等你。');
     const btn = this._el('button', 'btn-primary', box, '开启这份礼物');
     btn.addEventListener('click', () => {
       this.audio.start();
@@ -53,7 +54,8 @@ export class UI {
   _buildInspect() {
     this.inspectPanel = this._el('div', 'inspect hide');
     const card = this._el('div', 'note-card', this.inspectPanel);
-    this._el('div', 'note-text', card, esc(this.config.note));
+    this._el('div','note-kicker',card,'小狐狸带来的纸条');
+    this.noteText=this._el('div', 'note-text', card, esc(this.config.note));
     this._el('div', 'note-sign', card, `—— ${esc(this.config.fromName)}`);
     const row = this._el('div', 'inspect-actions', this.inspectPanel);
     const flip = this._el('button', 'btn-ghost', row, '翻面看看');
@@ -90,7 +92,7 @@ export class UI {
     this.end = this._el('div', 'end');
     const box = this._el('div', 'end-box', this.end);
     this._el('div', 'end-title', box, '灯亮了，路也记住了');
-    this._el('p', 'end-sub', box, '这是 30–45 秒样片：拾星、检视、带路—折返—并肩、脚印与足音、点灯与信件均已跑通。<br>完整版将扩展场景与音乐分层。');
+    this._el('p','end-sub',box,'愿这一路的温柔，陪你走进下一个冬天。');
     const row = this._el('div', 'end-links', box);
     const a = this._el('a', '', row, '样片配置 A');
     a.href = '#demo=a';
@@ -102,7 +104,8 @@ export class UI {
   }
 
   _buildControls() {
-    const bar = this._el('div', 'sound-bar');
+    const bar = this._el('details', 'sound-bar');
+    this._el('summary','sound-toggle',bar,'声音');
     this.muteBtn = this._el('button', 'icon-btn', bar, '🔊');
     this.muteBtn.title = '静音 / 取消静音';
     this.muteBtn.addEventListener('click', () => {
@@ -124,7 +127,7 @@ export class UI {
 
   _buildBadge(source) {
     const name = source === 'demo-b' ? 'B' : source === 'demo-a' ? 'A' : '定制';
-    this.badge = this._el('div', 'badge', this.root, `样片配置 ${name} · <a href="#demo=a">A</a> / <a href="#demo=b">B</a>`);
+    this.badge = this._el('div', 'badge hide', this.root, `样片配置 ${name} · <a href="#demo=a">A</a> / <a href="#demo=b">B</a>`);
     this.badge.querySelectorAll('a').forEach((a) =>
       a.addEventListener('click', () => location.reload()));
   }
@@ -143,9 +146,14 @@ export class UI {
     }
   }
 
-  setInspect(active, config) {
+  setInspect(active, config=this.config, flipped=false) {
+    const text=flipped?config.starText:config.note;
+    if(this.noteText.textContent!==text)this.noteText.textContent=text;
+    this.inspectPanel.querySelector('.note-kicker').textContent=flipped?'星星背面的话':'小狐狸带来的纸条';
     this._toggle(this.inspectPanel, active);
   }
+
+  setJourney(active) { if(this.journey)this.journey.classList.toggle('hide',!active); }
 
   toast(text, secs) {
     this.toastEl.textContent = text;

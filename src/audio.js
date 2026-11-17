@@ -5,8 +5,8 @@ export class AudioEngine {
     this.ctx = null;
     this.enabled = false;
     this.muted = false;
-    this.musicLevel = 0.8;
-    this.sfxLevel = 0.9;
+    this.musicLevel = 0.45;
+    this.sfxLevel = 0.48;
     this.layer = 0; // 0 开场稀疏 1 同行增层 2 点灯提升 3 读信回落
     this._timer = null;
     this._nextNoteTime = 0;
@@ -60,7 +60,7 @@ export class AudioEngine {
   }
   setMusicLevel(v) { this.musicLevel = v; if (this.musicBus) this.musicBus.gain.setTargetAtTime(v * 0.5, this.ctx.currentTime, 0.1); }
   setSfxLevel(v) { this.sfxLevel = v; if (this.sfxBus) this.sfxBus.gain.setTargetAtTime(v, this.ctx.currentTime, 0.1); }
-  setLayer(l) { this.layer = l; }
+  setLayer(l) { this.targetLayer = l; if(!this.ctx)this.layer=l; }
 
   _impulse(dur, decay) {
     const c = this.ctx;
@@ -94,8 +94,10 @@ export class AudioEngine {
   _schedule() {
     if (!this.enabled || this.muted) return;
     const c = this.ctx;
-    const BEAT = this.layer === 3 ? 1.15 : 0.85; // 读信更慢
+    const BEAT = 1.08; // 读信更慢
     while (this._nextNoteTime < c.currentTime + 0.6) {
+      if(this._beat%8===0 && this.targetLayer!==undefined)this.layer=this.targetLayer;
+      this.layerMix=(this.layerMix??0)+((this.layer===2?1:0)-(this.layerMix??0))*.16;
       this._playBeat(this._nextNoteTime, this._beat);
       this._nextNoteTime += BEAT;
       this._beat++;
@@ -108,8 +110,8 @@ export class AudioEngine {
     const melody = [0, -1, 2, -1, 3, -1, 1, -1, 4, -1, 2, -1, 3, -1, 1, -1];
     const idx = melody[beat % melody.length];
     if (idx >= 0) {
-      const oct = beat % 32 >= 16 ? 2 : 1;
-      this._pluck(scale[idx] * oct, t, 0.16, 1.8);
+      const oct = 1;
+      this._pluck(scale[idx] * oct, t, 0.075, 2.8);
     }
     // 层 1（同行）：每 4 拍一个轻柔五度垫
     if (this.layer >= 1 && this.layer !== 3 && beat % 8 === 0) {
@@ -118,7 +120,7 @@ export class AudioEngine {
     // 层 2（点灯）：短促明亮的分解和声
     if (this.layer === 2) {
       const arp = [0, 2, 4, 3];
-      if (beat % 2 === 0) this._bell(scale[arp[(beat / 2) % 4 | 0]] * 2, t, 0.12);
+      if (beat % 2 === 0) this._bell(scale[arp[(beat / 2) % 4 | 0]] * 2, t, 0.05*this.layerMix);
     }
     // 层 3（读信）：回到稀疏，只留低音
     if (this.layer === 3 && beat % 16 === 8) {
@@ -134,12 +136,12 @@ export class AudioEngine {
     o2.type = 'triangle'; o2.frequency.value = freq * 2.001;
     const g = c.createGain();
     const g2 = c.createGain();
-    g2.gain.value = 0.25;
+    g2.gain.value = 0.08;
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(gain, t + 0.012);
+    g.gain.linearRampToValueAtTime(gain, t + 0.045);
     g.gain.exponentialRampToValueAtTime(0.0004, t + dur);
     const lp = c.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 2400;
+    lp.type = 'lowpass'; lp.frequency.value = 1300;
     o1.connect(g); o2.connect(g2); g2.connect(g);
     g.connect(lp); lp.connect(this.musicBus);
     o1.start(t); o2.start(t);
@@ -170,7 +172,7 @@ export class AudioEngine {
     const mod = c.createOscillator();
     mod.frequency.value = freq * 3.01;
     const mg = c.createGain();
-    mg.gain.setValueAtTime(freq * 1.4, t);
+    mg.gain.setValueAtTime(freq * .18, t);
     mg.gain.exponentialRampToValueAtTime(1, t + 0.4);
     mod.connect(mg); mg.connect(car.frequency);
     const g = c.createGain();
@@ -190,24 +192,25 @@ export class AudioEngine {
     src.buffer = this.noiseBuf;
     src.playbackRate.value = who === 'fox' ? 1.5 : 1.0;
     const bp = c.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = who === 'fox' ? 900 : 380;
-    bp.Q.value = 0.9;
+    bp.type = 'lowpass';
+    bp.frequency.value = who === 'fox' ? 1400 : 950;
+    bp.Q.value = 0.4;
     const g = c.createGain();
-    const base = who === 'fox' ? 0.05 : 0.11;
+    const base = who === 'fox' ? 0.016 : 0.045;
     const att = 1 / (1 + dist * 0.35);
-    g.gain.setValueAtTime(base * att, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + (who === 'fox' ? 0.08 : 0.13));
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(base*att,t+.025);
+    g.gain.exponentialRampToValueAtTime(0.001, t + (who === 'fox' ? 0.12 : 0.20));
     src.connect(bp); bp.connect(g); g.connect(this.sfxBus);
     src.start(t);
-    src.stop(t + 0.2);
+    src.stop(t + 0.25);
   }
 
   chime() { // 拾起/翻面
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
-    this._bell(880, t, 0.14);
-    this._bell(1318.5, t + 0.09, 0.1);
+    this._bell(880, t, 0.05);
+    this._bell(1318.5, t + 0.15, 0.025);
   }
 
   placeStar() { // 安放：更低更厚的一声
@@ -220,6 +223,6 @@ export class AudioEngine {
 
   lampPing(i) { // 逐盏点亮：音高递增
     if (!this.enabled) return;
-    this._bell(660 * Math.pow(1.12, i), this.ctx.currentTime, 0.07);
+    this._bell([440,523.25,587.33,659.25,783.99,880][i%6], this.ctx.currentTime, 0.025);
   }
 }

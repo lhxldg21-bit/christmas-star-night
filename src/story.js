@@ -62,8 +62,8 @@ class FootprintPool {
 export class Story {
   constructor({ scene, world, player, fox, star, config, audio, ui, auto }) {
     Object.assign(this, { scene, world, player, fox, star, config, audio, ui, auto });
-    this.prints = new FootprintPool(scene, world, { w: 0.17, h: 0.34, color: 'rgba(96,112,160,0.85)', opacity: 0.95, max: 500 });
-    this.paws = new FootprintPool(scene, world, { w: 0.09, h: 0.12, color: 'rgba(96,112,160,0.75)', opacity: 0.9, max: 500 });
+    this.prints = new FootprintPool(scene, world, { w: 0.22, h: 0.42, color: 'rgba(48,68,104,1)', opacity: 1, max: 500 });
+    this.paws = new FootprintPool(scene, world, { w: 0.15, h: 0.2, color: 'rgba(70,91,137,0.9)', opacity: 0.95, max: 500 });
     this.reset();
   }
 
@@ -90,12 +90,12 @@ export class Story {
     this.p.pos.y = w.heightAt(this.p.pos.x, this.p.pos.z);
 
     const starPt = w.path.curve.getPointAt(0.06);
-    this.starGroundPos = new THREE.Vector3(starPt.x - 0.5, 0, starPt.z + 0.4);
+    this.starGroundPos = new THREE.Vector3(starPt.x - 0.55, 0, starPt.z + 0.4);
     this.starGroundPos.y = w.heightAt(this.starGroundPos.x, this.starGroundPos.z) + 0.22;
 
     const foxPt = w.path.curve.getPointAt(0.075);
     this.f = {
-      pos: new THREE.Vector3(foxPt.x + 0.8, 0, foxPt.z - 0.15),
+      pos: new THREE.Vector3(foxPt.x + 1.05, 0, foxPt.z - 0.15),
       yaw: 0,
       mode: 'guard',
       stride: 0,
@@ -107,12 +107,18 @@ export class Story {
       gagDone: false,
       gagT: -1,
       returnedOnce: false,
+      offerT: -1,
+      offered: false,
     };
     this.f.pos.y = w.heightAt(this.f.pos.x, this.f.pos.z);
 
     this.star.position.copy(this.starGroundPos);
     this.star.rotation.set(0.15, 0.3, 0);
     this.starScale = 1;
+    this.star.scale.setScalar(1);
+    this.pickupT = -1;
+    this.awakenT = -1;
+    this.audio.setLayer(0);
     this.inspect = { yaw: 0.3, pitch: 0.15, anchor: new THREE.Vector3(), active: false };
 
     this.camMode = 'follow';
@@ -181,6 +187,14 @@ export class Story {
       case 'start':
         if (this.state === 'cover') { this.state = 'walk'; this.audio.setLayer(0); }
         break;
+      case 'route': {
+        const point=this.world.path.curve.getPointAt(it.progress);
+        this._handleIntent({type:'move',x:point.x,z:point.z});
+        break;
+      }
+      case 'approach':
+        this._handleIntent({type:'move',x:this.starGroundPos.x-0.7,z:this.starGroundPos.z+0.6});
+        break;
       case 'move':
         if (this.state === 'walk') {
           // 限定可行走范围：以路径（含底座）为中心的走廊，超出则压回边缘
@@ -203,10 +217,14 @@ export class Story {
       case 'pickup':
         if (this.state === 'walk' && this.starState === 'ground' &&
             this.p.pos.distanceTo(this.starGroundPos) < 2.2) {
-          this.state = 'inspect';
-          this.starState = 'inspect';
+          this.state = 'pickup';
+          this.starState = 'pickup';
+          this.pickupT = 0;
+          this.p.target = null;
+          this.p.yaw = Math.atan2(this.starGroundPos.x-this.p.pos.x,this.starGroundPos.z-this.p.pos.z);
+          this.pickupFrom = this.star.position.clone();
           this.inspect.active = true;
-          this.inspect.yaw = 0.3; this.inspect.pitch = 0.15;
+          this.inspect.yaw = 0; this.inspect.pitch = 0.0;
           this.audio.chime();
         }
         break;
@@ -219,6 +237,7 @@ export class Story {
           this.starState = 'carried';
           this.inspect.active = false;
           if (this.f.mode === 'guard') this.f.mode = 'lead';
+          this.p.target=this.world.path.curve.getPointAt(.19);
           this.audio.setLayer(1);
         }
         break;
@@ -237,7 +256,7 @@ export class Story {
 
   _updatePlayer(dt) {
     const p = this.p;
-    const SPEED = 1.75, STRIDE = 0.52;
+    const SPEED = 1.45, STRIDE = 0.52;
     if (p.target && this.state === 'walk') {
       const dx = p.target.x - p.pos.x, dz = p.target.z - p.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -271,6 +290,20 @@ export class Story {
     g.position.copy(p.pos);
     g.rotation.y = p.yaw;
     this.player.pose(p.phase, p.moving, this.time);
+    const arms=this.player.limbs;
+    if (this.state==='pickup') {
+      const reach=Math.sin(Math.min(this.pickupT/2.4,1)*Math.PI);
+      g.position.y-=reach*.19;
+      arms.body.rotation.x=reach*.32;
+      arms.armL.rotation.x=-reach*1.3;
+      arms.armR.rotation.x=-reach*1.3;
+    } else {
+      arms.body.rotation.x=0;
+      if (this.starState==='inspect'||this.starState==='carried') {
+        arms.armL.rotation.x=-.55;arms.armR.rotation.x=-.55;
+        arms.armL.userData.elbow.rotation.x=-1.35;arms.armR.userData.elbow.rotation.x=-1.35;
+      }
+    }
   }
 
   _updateFox(dt) {
@@ -281,9 +314,26 @@ export class Story {
 
     if (f.mode === 'guard') {
       f.sitting = Math.min(1, f.sitting + dt * 4);
-      // 看着玩家
-      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      const near = this.starState === 'ground' && this.p.pos.distanceTo(this.starGroundPos) < 3.4;
+      if (near && !f.offered) {
+        f.mode = 'offer';
+        f.offerT = 0;
+        f.sitting = .2;
+      } else {
+        // 看着玩家
+        f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      }
       f.moving = Math.max(0, f.moving - dt * 5);
+    } else if (f.mode === 'offer') {
+      f.offerT += dt;
+      f.sitting = Math.max(0, f.sitting - dt * 5);
+      f.moving = 0;
+      const towardStar = Math.atan2(this.starGroundPos.x - f.pos.x, this.starGroundPos.z - f.pos.z);
+      f.yaw = dampAngle(f.yaw, f.offerT < 1.8 ? towardStar : Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
+      if (f.offerT > 2.75) {
+        f.mode = 'guard';
+        f.offered = true;
+      }
     } else if (f.mode === 'lead') {
       const pr = Math.min(this._progress(this.p.pos) + 0.16, 0.95);
       target = path.curve.getPointAt(pr);
@@ -314,10 +364,9 @@ export class Story {
       f.sitting = Math.max(0, f.sitting - dt * 6);
       f.moving = 0;
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
-      if (f.gagT > 0.4 && f.gagT < 1.7) {
-        this.fox.shakeHead((f.gagT - 0.4) / 1.3);
-      }
-      if (f.gagT >= 2.2) {
+
+      if (f.gagT >= 6.4) {
+        this.state = 'walk';
         f.mode = 'alongside';
         this.toastUntil = this.time + 3.6;
       }
@@ -370,10 +419,11 @@ export class Story {
     }
 
     // 雪落鼻尖桥段：玩家进度过 0.42 且未触发过
-    if (!f.gagDone && f.mode === 'lead' && this._progress(this.p.pos) > 0.42) {
+    if (!f.gagDone && f.mode === 'lead' && this._progress(this.p.pos) > 0.445) {
       f.gagDone = true;
       f.mode = 'gag';
       f.gagT = 0;
+      this.state='gag';
     }
 
     f.pos.y = this.world.heightAt(f.pos.x, f.pos.z);
@@ -381,38 +431,94 @@ export class Story {
     g.position.copy(f.pos);
     g.rotation.y = f.yaw - Math.PI / 2; // 模型朝 +x 建模
     this.fox.pose(f.phase, f.moving, f.sitting, this.time);
+    const ball=this.fox.parts.snowball;
+    ball.visible = f.mode === 'gag' && f.gagT > .7 && f.gagT < 3.25;
+    for (const puff of this.fox.parts.snowPuffs) {
+      const age = f.gagT - 1.75;
+      puff.visible = f.mode === 'gag' && age > 0 && age < 3.55;
+      if (puff.visible) {
+        const k = age / 3.55;
+        const a = puff.userData.angle;
+        const radius = .2 + k * .32;
+        puff.position.set(
+          .39 + Math.cos(a) * radius,
+          .5 + puff.userData.lift + k * (.24 + Math.sin(a) * .08),
+          Math.sin(a) * radius,
+        );
+        puff.scale.setScalar((1 - k * .55) * (.72 + (a % .7)));
+      }
+    }
+    if (f.mode === 'offer') {
+      const sniff = THREE.MathUtils.smoothstep(f.offerT, .65, 1.85);
+      const retreat = THREE.MathUtils.smoothstep(f.offerT, 2.05, 2.75);
+      this.fox.parts.headPivot.position.x = .3 + sniff * .085 - retreat * .085;
+      this.fox.parts.headPivot.position.y = .42 - sniff * .09 + retreat * .09;
+      this.fox.parts.headPivot.rotation.z = -.22 * sniff + .22 * retreat;
+    } else if (f.mode==='gag') {
+      if (f.gagT<2.1) {
+        ball.position.y=.04+Math.max(0,1.5-f.gagT)*.6;
+        this.fox.parts.headPivot.rotation.z=.18*Math.sin(Math.min(f.gagT/2,1)*Math.PI);
+      } else if(f.gagT<3.65) this.fox.shakeHead((f.gagT-2.1)/1.55);
+      else this.fox.parts.headPivot.rotation.z=-.15;
+    } else {
+      this.fox.parts.headPivot.position.x = .3;
+      this.fox.parts.headPivot.position.y = .42;
+    }
   }
 
   _updateStar(dt) {
     const s = this.star;
-    const targetScale = this.starState === 'inspect' ? 1.5 : 1;
+    const targetScale = this.starState === 'placed' ? 1.45 : 1;
     const sc = s.scale.x + (targetScale - s.scale.x) * Math.min(1, 6 * dt);
     s.scale.setScalar(sc);
     const L = s.userData.light;
+    const fwd=new THREE.Vector3(Math.sin(this.p.yaw),0,Math.cos(this.p.yaw));
+    this.inspect.anchor.copy(this.p.pos).addScaledVector(fwd,.34).add(new THREE.Vector3(0,.97,0));
+    s.userData.halo.material.opacity=this.starState==='placed' ? .65 : .12;
+    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.8 : .25;
     if (this.starState === 'ground') {
       L.intensity = 1.1;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
-      s.rotation.y += dt * 0.6;
+      s.rotation.y = Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z);
     } else if (this.starState === 'inspect') {
       s.position.lerp(this.inspect.anchor, 1 - Math.exp(-8 * dt));
-      s.rotation.y = dampAngle(s.rotation.y, this.inspect.yaw, 10, dt);
+      s.rotation.y = dampAngle(s.rotation.y, Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z) + this.inspect.yaw, 10, dt);
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
       L.intensity += (0.7 - L.intensity) * Math.min(1, 4 * dt);
-      const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(0.55);
-      const goal = this.p.pos.clone().add(side).add(new THREE.Vector3(0, 1.05 + Math.sin(this.time * 2.2) * 0.04, 0));
+      const side=new THREE.Vector3(Math.cos(this.p.yaw),0,-Math.sin(this.p.yaw));
+      const goal = this.inspect.anchor.clone().addScaledVector(side,-.28);
+      goal.y-=.05;
       s.position.lerp(goal, 1 - Math.exp(-6 * dt));
-      s.rotation.y += dt * 0.9;
+      s.rotation.y=Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z);
       s.rotation.x *= 1 - Math.min(1, 5 * dt);
     } else if (this.starState === 'placed') {
       L.intensity += (1.6 - L.intensity) * Math.min(1, 3 * dt);
       s.position.y = this.world.baseTop.y + 0.12 + Math.sin(this.time * 1.5) * 0.05;
-      s.rotation.y += dt * 0.7;
+      s.rotation.y=.5+Math.sin(this.time*.6)*.12;
     }
   }
 
   _updateBeats(dt) {
+    if(this.state==='pickup') {
+      this.pickupT+=dt;
+      const k=THREE.MathUtils.smoothstep(this.pickupT,.7,2.4);
+      this.star.position.copy(this.pickupFrom).lerp(this.inspect.anchor,k);
+      this.star.rotation.y=.62;
+      if(this.pickupT>=2.4){this.state='inspect';this.starState='inspect';}
+      return;
+    }
+    if(this.state==='awakening') {
+      this.awakenT+=dt;
+      const k=THREE.MathUtils.smoothstep(this.awakenT,.5,3.2);
+      this.star.userData.star.material.emissiveIntensity=.22+k*.88;
+      this.star.userData.light.intensity=.4+k*3.35;
+      this.star.userData.halo.material.opacity=.1+k*.48;
+      this.world.baseLight.intensity=.35+k*3;
+      if(this.awakenT>=3.6){this.state='finale';this.starState='placed';this.lampTimer=0;this.audio.setLayer(2);}
+      return;
+    }
     // 安放动画
     if (this.state === 'placing') {
       this.placeT += dt;
@@ -424,11 +530,12 @@ export class Story {
       this.star.position.copy(mid);
       this.star.userData.light.intensity = 1.1 + e * 2.2;
       if (k >= 1) {
-        this.starState = 'placed';
-        this.state = 'finale';
-        this.lampTimer = 0;
+        this.starState = 'awakening';
+        this.state = 'awakening';
+        this.awakenT = 0;
+        this.lampTimer = -1;
         this.lampsLit = 0;
-        this.audio.setLayer(2);
+
       }
       return;
     }
@@ -436,11 +543,11 @@ export class Story {
     if (this.state === 'finale') {
       if (this.lampTimer >= 0 && this.lampsLit < this.world.lamps.length) {
         this.lampTimer += dt;
-        const idx = Math.floor(this.lampTimer / 0.45);
+        const idx = Math.floor(this.lampTimer / 0.65);
         while (this.lampsLit <= idx && this.lampsLit < this.world.lamps.length) {
           // 从离底座最近（索引大）的开始
           const lamp = this.world.lamps[this.world.lamps.length - 1 - this.lampsLit];
-          lamp.lit = 1;
+          lamp.lit = .001;
           this.audio.lampPing(this.lampsLit);
           this.lampsLit++;
         }
@@ -459,11 +566,11 @@ export class Story {
           lamp.pool.material.opacity = k * 0.75;
         }
       }
-      this.world.baseLight.intensity = 0.35 + Math.min(1, (this.pullbackT >= 0 ? this.pullbackT : 0.2)) * 1.1;
+      this.world.baseLight.intensity = 2.8;
       // 拉镜完成后出信
       if (this.pullbackT >= 0) {
         this.pullbackT += dt;
-        if (this.pullbackT > 3.6 && this.letterT < 0) {
+        if (this.pullbackT > 5.3 && this.letterT < 0) {
           this.letterT = 0;
           this.state = 'letter';
           this.audio.setLayer(3);
@@ -477,37 +584,42 @@ export class Story {
   applyCamera(camera, dt) {
     const k = dt ? 1 - Math.exp(-3.2 * dt) : 1;
     let goalPos, goalLook;
-    if (this.state === 'inspect') {
-      // 检视：侧向构图——人物在画面左缘，星星在右侧中央，不被帽子挡住
-      const fwd = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw));
-      const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
-      this.inspect.anchor.copy(this.p.pos)
-        .add(fwd.clone().multiplyScalar(0.85))
-        .add(right.clone().multiplyScalar(0.45))
-        .add(new THREE.Vector3(0, 1.32, 0));
-      goalPos = this.p.pos.clone()
-        .add(fwd.clone().multiplyScalar(-0.55))
-        .add(right.clone().multiplyScalar(-1.35))
-        .add(new THREE.Vector3(0, 1.5, 0));
-      goalLook = this.inspect.anchor;
+    if (this.state === 'inspect' || this.state==='pickup') {
+      const center=this.p.pos.clone().lerp(this.f.pos,.52);
+      const axis=new THREE.Vector3().subVectors(this.f.pos,this.p.pos).setY(0).normalize();
+      const side=new THREE.Vector3(-axis.z,0,axis.x);
+      goalPos=center.clone().addScaledVector(side,5.35).add(new THREE.Vector3(0,2.15,0));
+      goalLook=center.add(new THREE.Vector3(0,.92,0));
+    } else if(this.state==='gag') {
+      const center=this.f.pos.clone().lerp(this.p.pos,.5);
+      const axis=new THREE.Vector3().subVectors(this.f.pos,this.p.pos).setY(0).normalize();
+      const side=new THREE.Vector3(-axis.z,0,axis.x);
+      goalPos=center.clone().addScaledVector(side,6.4).addScaledVector(axis,1.8).add(new THREE.Vector3(0,2.5,0));
+      goalLook=center.add(new THREE.Vector3(0,.62,0));
+    } else if(['placing','awakening'].includes(this.state) || (this.state==='finale' && this.pullbackT<0)) {
+      goalPos=this.world.basePos.clone().add(new THREE.Vector3(3.4,2.5,8));
+      goalLook=this.world.baseTop.clone().add(new THREE.Vector3(-.4,-.1,1.2));
     } else if ((this.state === 'finale' || this.state === 'letter') && this.pullbackT >= 0) {
       // 拉镜：升到能看见整条路、两串足迹与小院的广角
-      const t = Math.min(this.pullbackT / 3.2, 1);
+      const t = Math.min(this.pullbackT / 4.8, 1);
       const e = t * t * (3 - 2 * t);
       const b = this.world.basePos;
       const near = this.p.pos.clone().add(new THREE.Vector3(0, 2.9, 4.4));
-      const far = new THREE.Vector3(b.x + 8.8, 13.5, b.z + 23.5);
+      const far = new THREE.Vector3(b.x + 14, 18, b.z + 30);
       goalPos = near.lerp(far, e);
-      goalLook = new THREE.Vector3(b.x, 1.0, b.z).lerp(new THREE.Vector3(-0.5, 0.2, -5), e);
+      goalLook = new THREE.Vector3(b.x, 1.0, b.z).lerp(new THREE.Vector3(1.0, 0.1, -17), e);
     } else {
       // 跟随：路径方向后上方，半固定
       const pr = Math.max(0.02, this._progress(this.p.pos));
       const tangent = this.world.path.curve.getTangentAt(Math.min(pr, 0.99));
-      const back = tangent.clone().multiplyScalar(-4.6);
-      back.y = 3.1;
+      const back = tangent.clone().multiplyScalar(-4.8);
+      back.y = 2.65;
+      back.x += 2.75;
       goalPos = this.p.pos.clone().add(back);
-      goalLook = this.p.pos.clone().add(tangent.clone().multiplyScalar(1.8)).add(new THREE.Vector3(0, 0.85, 0));
+      goalLook = this.p.pos.clone().add(tangent.clone().multiplyScalar(2.4)).add(new THREE.Vector3(0, 0.78, 0));
     }
+    const framing=THREE.MathUtils.clamp(.82/camera.aspect,1,1.7);
+    goalPos.sub(goalLook).multiplyScalar(framing).add(goalLook);
     if (!this.camInit) {
       this.camPos.copy(goalPos);
       this.camLook.copy(goalLook);
@@ -529,7 +641,8 @@ export class Story {
       this.state === 'walk' && nearStar ? '拾起星星' :
       this.state === 'walk' && nearBase ? '安放星星' : null,
     );
-    this.ui.setInspect(this.state === 'inspect', this.config);
+    this.ui.setInspect(this.state === 'inspect', this.config, Math.abs(Math.sin(this.inspect.yaw/2))>.7);
+    this.ui.setJourney(this.state==='walk' && !nearStar && !nearBase && this.time >= this.toastUntil);
     this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
   }
 }
@@ -543,18 +656,12 @@ function dampAngle(a, b, lambda, dt) {
 
 // —— 自动样片脚本：与真实点击同路径，确定性覆盖全部验收点 ——
 function buildAutoScript() {
-  const mv = (x, z) => ({ type: 'move', x, z });
+  const route=(t,progress)=>({t,intent:{type:'route',progress}});
   return [
-    { t: 0.4, intent: { type: 'start' } },
-    { t: 0.8, intent: mv(-1.6, 7.2) },        // 走向星星
-    { t: 4.4, intent: { type: 'pickup' } },   // 拾起
-    { t: 5.2, intent: { type: 'flip' } },     // 翻面看短句
-    { t: 8.2, intent: { type: 'continue' } }, // 继续走
-    { t: 8.6, intent: mv(-3.2, 2.6) },        // 走一段
-    // 11.9 ~ 14.6 主动停下：狐狸跑远 → 折返 → 坐下等候
-    { t: 14.6, intent: mv(-1.4, -1.6) },      // 继续，途中触发雪落鼻尖
-    { t: 19.4, intent: mv(1.2, -6.6) },       // 并肩同行
-    { t: 23.4, intent: mv(0.3, -10.6) },      // 抵达小院
-    { t: 27.2, intent: { type: 'place' } },   // 安放星星
+    {t:.4,intent:{type:'start'}},{t:.8,intent:{type:'approach'}},
+    {t:4.4,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
+    {t:12,intent:{type:'continue'}}, route(12.5,.20),
+    route(19,.43),route(24,.60),route(36,.72),route(44,.88),route(49,.99),
+    {t:56,intent:{type:'place'}},
   ];
 }

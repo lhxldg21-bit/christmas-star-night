@@ -10,9 +10,9 @@ function mat(color, opts = {}) {
 export function buildStar(config) {
   const group = new THREE.Group();
   const shape = new THREE.Shape();
-  const R = 0.16, r = 0.068;
+  const R = 0.23, r = 0.10;
   for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
     const rad = i % 2 === 0 ? R : r;
     const x = Math.cos(a) * rad, y = Math.sin(a) * rad;
     if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
@@ -22,7 +22,7 @@ export function buildStar(config) {
   geo.center();
   const starMat = new THREE.MeshStandardMaterial({
     color: PALETTE.starAmber, roughness: 0.35, metalness: 0.1,
-    emissive: PALETTE.starAmber, emissiveIntensity: 0.85,
+    emissive: PALETTE.starAmber, emissiveIntensity: 0.25,
   });
   const star = new THREE.Mesh(geo, starMat);
   star.castShadow = true;
@@ -33,17 +33,26 @@ export function buildStar(config) {
   tag.position.z = -0.045;
   tag.rotation.y = Math.PI;
   tag.scale.setScalar(0.9);
+  tag.visible = false;
   group.add(tag);
 
   // 挂签：给 TA
   const hang = makeTextPlate(`给 ${config.toName}`, 256, 80, '#f3eee6', '#5a4a6a');
   hang.position.set(0, -0.24, 0.01);
   hang.scale.set(0.55, 0.55 * 0.31, 1);
+  hang.visible = false;
   group.add(hang);
 
   const light = new THREE.PointLight(PALETTE.starAmber, 1.1, 7, 1.7);
   group.add(light);
 
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const ctx = cv.getContext('2d'), grad = ctx.createRadialGradient(64,64,2,64,64,64);
+  grad.addColorStop(0,'#fff0c2aa'); grad.addColorStop(.25,'#ffcb6633'); grad.addColorStop(1,'#ffcb6600');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthWrite:false,opacity:.15,blending:THREE.AdditiveBlending}));
+  halo.scale.setScalar(1.6);group.add(halo);
+  group.userData.halo = halo;
   group.userData.star = star;
   group.userData.light = light;
   return group;
@@ -123,31 +132,31 @@ export function buildPlayer() {
   const legR = legL.clone();
   legL.position.set(-0.09, 0.17, 0);
   legR.position.set(0.09, 0.17, 0);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.09), coat);
-  const armR = armL.clone();
-  armL.position.set(-0.26, 0.72, 0);
-  armR.position.set(0.26, 0.72, 0);
-  // 肩点为摆动轴
-  for (const [limb, py] of [[legL, 0.34], [legR, 0.34], [armL, 0.92], [armR, 0.92]]) {
-    limb.geometry.translate(0, -limb.geometry.parameters.height / 2 + 0.02, 0);
-    limb.position.y = py;
-  }
-  legL.position.set(-0.09, 0.34, 0);
-  legR.position.set(0.09, 0.34, 0);
-  armL.position.set(-0.26, 0.92, 0);
-  armR.position.set(0.26, 0.92, 0);
-  legL.castShadow = legR.castShadow = true;
-
+  const makeArm=(side)=>{
+    const arm=new THREE.Group();arm.position.set(side*.19,.9,0);
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(.065,.07,.22,8),coat);upper.position.y=-.11;
+    const elbow=new THREE.Group();elbow.position.y=-.21;
+    const fore=new THREE.Mesh(new THREE.CylinderGeometry(.06,.065,.23,8),coat);fore.position.y=-.115;
+    const mitten=new THREE.Mesh(new THREE.SphereGeometry(.072,8,6),mat(PALETTE.cream));mitten.position.y=-.23;
+    const shoulder=new THREE.Mesh(new THREE.SphereGeometry(.075,8,6),coat);
+    elbow.add(fore,mitten);arm.add(upper,elbow,shoulder);arm.userData.elbow=elbow;
+    return arm;
+  };
+  const armL=makeArm(-1),armR=makeArm(1);
+  // Each limb owns its geometry; translating a shared clone twice displaced both legs.
+  legR.geometry=legL.geometry.clone();
+  for(const leg of [legL,legR]){leg.geometry.translate(0,-.15,0);leg.position.y=.34;leg.castShadow=true;}
   g.add(body, head, hat, brim, scarfRing, scarfTail, legL, legR, armL, armR);
   return {
     group: g,
-    limbs: { legL, legR, armL, armR, scarfTail, body },
+    limbs: { legL, legR, armL, armR, scarfTail, body, head },
     // phase：步态相位；moving 0~1 淡入摆臂
     pose(phase, moving, t) {
       const s = Math.sin(phase), c = Math.sin(phase + Math.PI);
       legL.rotation.x = s * 0.55 * moving;
       legR.rotation.x = c * 0.55 * moving;
       armL.rotation.x = c * 0.4 * moving;
+      armL.userData.elbow.rotation.x=0;armR.userData.elbow.rotation.x=0;
       armR.rotation.x = s * 0.4 * moving;
       body.position.y = 0.62 + Math.abs(Math.sin(phase)) * 0.035 * moving;
       head.position.y = 1.12 + Math.abs(Math.sin(phase)) * 0.03 * moving;
@@ -165,32 +174,55 @@ export function buildFox() {
   const cream = mat(PALETTE.cream);
   const dark = mat(0x5a3a28);
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.24, 0.22), rust);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), rust);
+  body.scale.set(1.22,0.70,0.65);
   body.position.y = 0.3;
   body.castShadow = true;
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.2, 0.2), cream);
-  chest.position.set(0.2, 0.28, 0);
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(.13,8,6), cream);
+  chest.scale.set(.6,1,.88);chest.position.set(0.2, 0.3, 0);
 
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.18, 0.18), rust);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), rust);
   head.castShadow = true;
-  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.1), cream);
+  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.20, 6), cream);
+  snout.rotation.z=-Math.PI/2;
   snout.position.set(0.14, -0.03, 0);
   const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), dark);
   nose.position.set(0.21, -0.02, 0);
-  const earL = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 4), dark);
+  const earL = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.18, 4), rust);
   const earR = earL.clone();
-  earL.position.set(-0.03, 0.13, -0.06);
-  earR.position.set(-0.03, 0.13, 0.06);
+  earL.position.set(-0.03, 0.16, -0.085);
+  earR.position.set(-0.03, 0.16, 0.085);
+  for (const side of [-1,1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(.019,8,6),mat(0x202b36));
+    eye.position.set(.07,.025,side*.125); headPivot.add(eye);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(.006,6,4),mat(0xffffff));
+    shine.position.set(.078,.031,side*.14);headPivot.add(shine);
+  }
+  const snowball = new THREE.Mesh(new THREE.SphereGeometry(.062,8,6),mat(0xffffff));
+  snowball.position.set(.21,.04,0);snowball.visible=false;headPivot.add(snowball);
   headPivot.add(head, snout, nose, earL, earR);
+
+  // A small puff burst makes the nose-snow gag legible even in a still frame.
+  const snowPuffs = [];
+  const puffGeo = new THREE.SphereGeometry(.045, 7, 5);
+  const puffMat = mat(0xf8fbff, { roughness: 1 });
+  for (let i = 0; i < 8; i++) {
+    const puff = new THREE.Mesh(puffGeo, puffMat);
+    puff.visible = false;
+    puff.userData.angle = (i / 8) * Math.PI * 2;
+    puff.userData.lift = .028 + (i % 3) * .018;
+    g.add(puff);
+    snowPuffs.push(puff);
+  }
 
   const tailPivot = new THREE.Group();
   tailPivot.position.set(-0.24, 0.34, 0);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.13, 0.13), rust);
-  tail.position.x = -0.14;
-  const tailTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.11, 0.11), cream);
-  tailTip.position.x = -0.32;
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(.18,8,6), rust);
+  tail.scale.set(1.5,.7,.7);tail.position.x = -0.18;
+  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(.115,8,6), cream);
+  tailTip.scale.set(1.15,.75,.75);tailTip.position.x = -0.38;
   tail.castShadow = true;
   tailPivot.add(tail, tailTip);
   tailPivot.rotation.z = 0.5;
@@ -206,18 +238,19 @@ export function buildFox() {
   g.add(body, chest, headPivot, tailPivot);
   return {
     group: g,
-    parts: { body, headPivot, tailPivot, legs, nose },
+    parts: { body, headPivot, tailPivot, legs, nose, snowball, snowPuffs },
     // gait：步频相位；moving 0~1；sitting：坐下姿态权重
     pose(phase, moving, sitting, t) {
       const swing = 0.7 * moving;
-      legs[0].rotation.x = Math.sin(phase) * swing;
-      legs[1].rotation.x = Math.sin(phase + Math.PI) * swing;
-      legs[2].rotation.x = Math.sin(phase + Math.PI) * swing;
-      legs[3].rotation.x = Math.sin(phase) * swing;
+      legs[0].rotation.z = Math.sin(phase) * swing;
+      legs[1].rotation.z = Math.sin(phase + Math.PI) * swing;
+      legs[2].rotation.z = Math.sin(phase + Math.PI) * swing;
+      legs[3].rotation.z = Math.sin(phase) * swing;
       body.position.y = 0.3 + Math.abs(Math.sin(phase)) * 0.03 * moving - sitting * 0.1;
       body.rotation.z = sitting * 0.35;
       headPivot.position.y = 0.42 - sitting * 0.04 + Math.sin(t * 1.8) * 0.006;
       headPivot.rotation.z = sitting * 0.15;
+      headPivot.rotation.y = 0;
       tailPivot.rotation.z = 0.5 + sitting * 0.5;
       tailPivot.rotation.y = Math.sin(t * (moving > 0.1 ? 6 : 2.2)) * (moving > 0.1 ? 0.25 : 0.12);
     },

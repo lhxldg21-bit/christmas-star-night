@@ -109,6 +109,22 @@ canvas{display:block;position:fixed;inset:0}
   .sound-bar{gap:7px;padding:5px 10px}
   .note-card{max-width:20rem}
 }
+/* Quiet, paper-like interface; preserve the image above the reading area. */
+.sound-bar{display:block;border:none;background:rgba(17,31,44,.46);border-radius:6px;padding:10px 14px;color:#e6e5de;font-size:12px;letter-spacing:.15em}
+.sound-toggle{cursor:pointer;list-style:none}.sound-toggle::-webkit-details-marker{display:none}
+.sound-bar[open]{display:flex;gap:12px;align-items:center}
+.note-card{border-radius:3px;box-shadow:0 8px 28px #0a142055;max-width:430px;padding:22px 28px;border-top:2px solid #b79765;background:#f8eee0}
+.note-card:before{display:none}.note-kicker{font-size:11px;letter-spacing:.24em;color:#8a775b;margin-bottom:12px}
+.note-text{font-size:16px;line-height:1.9;color:#342b25}.note-sign{font-size:13px;color:#675746}
+.inspect{padding-bottom:30px;gap:12px;background:linear-gradient(0deg,#102033b0,transparent);padding-top:22px}
+.btn-primary,.btn-primary.small,.prompt{background:#e6cca0;border:1px solid #f3dfb8;border-radius:4px;box-shadow:0 4px 18px #13213022;font-size:14px;letter-spacing:.13em;padding:12px 24px;animation:none}
+.btn-ghost{border-radius:4px;padding:11px 22px;font-size:14px;background:#24394c80}
+.inspect-hint{color:#d6dfe5;font-size:11px}.toast{top:auto;bottom:9vh;background:#172d40c7;border-radius:4px;font-size:14px}
+.journey-hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;letter-spacing:.14em;color:#f3eee6;text-shadow:0 1px 6px #102030;background:#1d35486b;padding:9px 16px;border-radius:4px;pointer-events:none!important}
+.letter{background:#12213340;backdrop-filter:none;align-items:flex-end;padding-bottom:42px}
+.letter-paper{border-radius:3px;max-height:52vh;box-shadow:0 16px 40px #07152266;border-top:2px solid #b9a17b;background:#f8efe2}
+.letter-body{font-size:15px;line-height:2}.letter-to{font-size:17px}
+@media(max-width:500px){.note-card{padding:16px 20px}.note-text{font-size:14px}.inspect{padding:14px 20px 22px}.note-kicker{margin-bottom:8px}.note-sign{margin-top:5px}.letter-paper{padding:22px;max-height:55vh}.sound-bar{font-size:11px}.journey-hint{font-size:11px;bottom:22px}}
 </style>
 </head>
 <body>
