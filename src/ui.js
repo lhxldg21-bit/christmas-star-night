@@ -94,13 +94,9 @@ export class UI {
     this._el('div', 'end-title', box, '灯亮了，路也记住了');
     this._el('p','end-sub',box,'愿这一路的温柔，陪你走进下一个冬天。');
     const row = this._el('div', 'end-links', box);
-    const a = this._el('a', '', row, '样片配置 A');
-    a.href = '#demo=a';
-    const b = this._el('a', '', row, '样片配置 B');
-    b.href = '#demo=b';
     const again = this._el('a', '', row, '再走一遍');
     again.href = location.pathname + location.search;
-    for (const link of [a, b, again]) link.addEventListener('click', () => location.reload());
+    again.addEventListener('click', () => location.reload());
   }
 
   _buildControls() {

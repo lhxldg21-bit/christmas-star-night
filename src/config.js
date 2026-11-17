@@ -2,8 +2,8 @@
 // 格式：#c=<base64url(JSON)>；#demo=a|b 选择内置样片配置；无 hash 用默认 A。
 
 const DEFAULTS = {
-  toName: '你',
-  fromName: '我',
+  toName: '春春',
+  fromName: 'sii',
   note: '我托这只小狐狸来接你。它第一次送这么重要的礼物，可能比我还紧张。',
   starText: '今晚的星星，只为你一个人亮。',
   walkLine: '本来想让它表现得稳重一点。不过，能让你笑一下也好。',
@@ -14,7 +14,7 @@ const DEFAULTS = {
     '其实我也一样。攒了一整年的勇气，绕了很长的路，想把这些话好好送到你面前。\n' +
     '世界那么大，灯火那么多，可我每次抬头，最想看到的那颗星星，还是你。\n' +
     '以后开心的时候，我想陪你多走一段；累的时候，也想在你身边停一会儿。\n' +
-    '这个圣诞，愿意和{from}{activity}吗？\n' +
+    '这个圣诞，愿意和我{activity}吗？\n' +
     '这次，换我来接你，好吗？\n' +
     '——{from}',
   theme: 'snow-night',
@@ -23,29 +23,29 @@ const DEFAULTS = {
 // 样片配置 A：默认告白语气
 export const DEMO_A = {
   ...DEFAULTS,
-  toName: '阿棠',
-  fromName: '小拾',
+  toName: '春春',
+  fromName: 'sii',
   activity: '一起去看跨年的灯',
 };
 
 // 样片配置 B：换称呼、换短句、整封信重写，验证"可整体重写"
 export const DEMO_B = {
   ...DEFAULTS,
-  toName: '老周',
-  fromName: '阿岚',
+  toName: '春春',
+  fromName: 'sii',
   note: '路有点滑，跟着它慢慢走。我在灯下等你。',
   starText: '第三年，还是想和你一起过冬天。',
   walkLine: '它小时候就这样，一高兴就跑丢，还好记得回来。',
   activity: '去河边放一次灯',
   letter:
-    '老周：\n' +
+    '春春：\n' +
     '见字如面。\n' +
     '这条雪路我让它先走了一遍，确认每一盏灯都亮了，才敢把链接发给你。\n' +
     '这一年我们都挺忙的，忙到很多话只在心里过了一遍。\n' +
     '但有些事没变：看到好看的雪，第一个想拍给你；走到亮着灯的路口，还是会想起你。\n' +
     '这个圣诞，愿意和我去河边放一次灯吗？\n' +
     '这次，换我来接你，好吗？\n' +
-    '——阿岚',
+    '——sii',
 };
 
 function b64urlDecode(s) {
