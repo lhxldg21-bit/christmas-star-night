@@ -107,6 +107,7 @@ export class Story {
       gagDone: false,
       gagT: -1,
       hideT: 0,
+      inviteT: 0,
       returnedOnce: false,
       offerT: -1,
       offered: false,
@@ -148,6 +149,7 @@ export class Story {
       lamp.pool.material.opacity = 0;
     }
     this.world.baseLight.intensity = 0.35;
+    if (this.world.foxSnowfall) this.world.foxSnowfall.points.visible = false;
     this.fox.parts.headPivot.rotation.set(0, 0, 0);
     if (this.ui && this.ui.resetTransient) this.ui.resetTransient();
     this._syncUi();
@@ -352,15 +354,21 @@ export class Story {
         f.offered = true;
       }
     } else if (f.mode === 'lead') {
-      const pr = Math.min(this._progress(this.p.pos) + 0.16, 0.95);
+      const pr = Math.min(this._progress(this.p.pos) + 0.075, 0.95);
       target = path.curve.getPointAt(pr);
-      speed = RUN;
+      speed = 1.65;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       const distToPlayer = f.pos.distanceTo(this.p.pos);
-      // 跑太远了，或玩家停下太久 → 折返
-      if (distToPlayer > 5.2 || (this.p.idleTime > 1.6 && distToPlayer > 3)) {
-        f.mode = 'return';
+      // Stay visible as a guide. If the player pauses, wait ahead instead of
+      // sprinting all the way back and making the scene feel stalled.
+      if (this.p.idleTime > .75 && distToPlayer > 1.55) {
+        f.mode = 'waitAhead';
       }
+    } else if (f.mode === 'waitAhead') {
+      f.sitting = Math.min(1, f.sitting + dt * 5);
+      f.moving = Math.max(0, f.moving - dt * 6);
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      if (this.p.moving > .18) f.mode = 'lead';
     } else if (f.mode === 'return') {
       target = this.p.pos.clone();
       const away = new THREE.Vector3().subVectors(f.pos, this.p.pos).setY(0);
@@ -376,26 +384,43 @@ export class Story {
       f.moving = Math.max(0, f.moving - dt * 5);
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
       if (this.p.moving > 0.5) f.mode = 'lead';
+    } else if (f.mode === 'invite') {
+      f.inviteT += dt;
+      f.sitting = Math.max(0, f.sitting - dt * 7);
+      f.moving = 0;
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 7, dt);
+      if (f.inviteT > 1.25) {
+        f.mode = 'hide';
+        f.hideT = 0;
+      }
     } else if (f.mode === 'hide') {
       f.hideT += dt;
       target = this.world.foxHidePos.clone();
       speed = RUN * 1.72;
       f.sitting = Math.max(0, f.sitting - dt * 8);
       if (f.pos.distanceTo(target) < .24) {
-        f.mode = 'gag';
+        f.mode = 'peek';
         f.gagT = 0;
-        this.state = 'gag';
       }
-    } else if (f.mode === 'gag') {
+    } else if (f.mode === 'peek') {
       f.gagT += dt;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       f.moving = 0;
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
 
-      if (f.gagT >= 6.4) {
-        this.state = 'walk';
+      if (f.gagT >= 5.15) {
+        f.mode = 'comeback';
+      }
+    } else if (f.mode === 'comeback') {
+      const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(1.05);
+      const ahead = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw)).multiplyScalar(.3);
+      target = this.p.pos.clone().add(side).add(ahead);
+      speed = RUN * .9;
+      f.sitting = Math.max(0, f.sitting - dt * 6);
+      if (f.pos.distanceTo(target) < .32) {
         f.mode = 'alongside';
-        this.toastUntil = this.time + 3.6;
+        this.state = 'walk';
+        this.toastUntil = this.time + 3.8;
       }
     } else if (f.mode === 'alongside') {
       const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(1.05);
@@ -417,7 +442,7 @@ export class Story {
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
     }
 
-    if (target && f.mode !== 'gag') {
+    if (target && f.mode !== 'peek') {
       const dx = target.x - f.pos.x, dz = target.z - f.pos.z;
       const dist = Math.hypot(dx, dz);
       if (dist > 0.06) {
@@ -441,27 +466,31 @@ export class Story {
       } else {
         f.moving = Math.max(0, f.moving - dt * 6);
       }
-    } else if (f.mode !== 'gag') {
+    } else if (f.mode !== 'peek') {
       f.moving = Math.max(0, f.moving - dt * 6);
     }
 
-    // 狐狸先冲到弯道雪堆后，再探头完成落雪表演。
+    // Invite the player, run to cover, then let the environment interrupt the
+    // performance. The text arrives only after the fox has returned.
     if (!f.gagDone && f.mode === 'lead' && this._progress(this.p.pos) > 0.445) {
       f.gagDone = true;
-      f.mode = 'hide';
-      f.hideT = 0;
+      f.mode = 'invite';
+      f.inviteT = 0;
+      this.state = 'gag';
+      this.p.target = null;
     }
 
     f.pos.y = this.world.heightAt(f.pos.x, f.pos.z);
     const g = this.fox.group;
     g.position.copy(f.pos);
     g.rotation.y = f.yaw - Math.PI / 2; // 模型朝 +x 建模
+    g.rotation.z = 0;
     this.fox.pose(f.phase, f.moving, f.sitting, this.time);
     const ball=this.fox.parts.snowball;
-    ball.visible = f.mode === 'gag' && f.gagT > .45 && f.gagT < 3.25;
+    ball.visible = f.mode === 'peek' && f.gagT > .45 && f.gagT < 3.25;
     for (const puff of this.fox.parts.snowPuffs) {
       const age = f.gagT - 1.75;
-      puff.visible = f.mode === 'gag' && age > 0 && age < 3.55;
+      puff.visible = f.mode === 'peek' && age > 0 && age < 3.55;
       if (puff.visible) {
         const k = age / 3.55;
         const a = puff.userData.angle;
@@ -474,19 +503,25 @@ export class Story {
         puff.scale.setScalar((1 - k * .55) * (.72 + (a % .7)));
       }
     }
-    if (f.mode === 'offer') {
+    if (f.mode === 'invite') {
+      const bounce = Math.max(0, Math.sin(f.inviteT * Math.PI * 3)) * .035;
+      g.position.y += bounce;
+      this.fox.parts.headPivot.rotation.z = Math.sin(f.inviteT * Math.PI * 2) * .08;
+      this.fox.parts.headPivot.rotation.y = Math.sin(f.inviteT * Math.PI * 4) * .18;
+      this.fox.parts.tailPivot.rotation.y = Math.sin(f.inviteT * 14) * .32;
+    } else if (f.mode === 'offer') {
       const sniff = THREE.MathUtils.smoothstep(f.offerT, .65, 1.85);
       const retreat = THREE.MathUtils.smoothstep(f.offerT, 2.05, 2.75);
       this.fox.parts.headPivot.position.x = .3 + sniff * .085 - retreat * .085;
       this.fox.parts.headPivot.position.y = .42 - sniff * .09 + retreat * .09;
       this.fox.parts.headPivot.rotation.z = -.22 * sniff + .22 * retreat;
-    } else if (f.mode==='gag') {
+    } else if (f.mode==='peek') {
       const peek = THREE.MathUtils.smoothstep(f.gagT, 0, .72);
       this.fox.parts.headPivot.position.y = .42 + peek * .12;
       this.fox.parts.headPivot.rotation.y = Math.sin(f.gagT * 1.4) * .18 * (1 - peek);
       if (f.gagT < 1.9) {
         const drop = THREE.MathUtils.smoothstep(f.gagT, .45, 1.75);
-        ball.position.y = .04 + (1 - drop) * 1.05;
+        ball.position.y = .04 + (1 - drop) * .54;
         this.fox.parts.headPivot.rotation.z = .08 + Math.sin(drop * Math.PI) * .16;
       } else if (f.gagT < 3.45) {
         this.fox.shakeHead((f.gagT - 1.9) / 1.55);
@@ -503,11 +538,28 @@ export class Story {
       this.fox.parts.headPivot.position.x = .3;
       this.fox.parts.headPivot.position.y = .42;
     }
+
+    const shower = this.world.foxSnowfall;
+    if (shower) {
+      const showerOn = f.mode === 'peek' && f.gagT > .18 && f.gagT < 1.9;
+      shower.points.visible = showerOn;
+      if (showerOn) {
+        const positions = shower.points.geometry.attributes.position.array;
+        for (let i = 0; i < shower.seeds.length; i++) {
+          const seed = shower.seeds[i];
+          const fall = Math.max(0, (f.gagT - .18 - seed.delay) * seed.speed);
+          positions[i * 3] = seed.x + Math.sin(this.time * 2.1 + i) * .025;
+          positions[i * 3 + 1] = Math.max(.02, .78 - fall);
+          positions[i * 3 + 2] = seed.z + Math.cos(this.time * 1.7 + i) * .02;
+        }
+        shower.points.geometry.attributes.position.needsUpdate = true;
+      }
+    }
   }
 
   _updateStar(dt) {
     const s = this.star;
-    const targetScale = this.starState === 'placed' ? 1.45 : 1;
+    const targetScale = this.starState === 'placed' ? 1.3 : 1;
     const sc = s.scale.x + (targetScale - s.scale.x) * Math.min(1, 6 * dt);
     s.scale.setScalar(sc);
     const L = s.userData.light;
@@ -534,7 +586,7 @@ export class Story {
       s.rotation.x *= 1 - Math.min(1, 5 * dt);
     } else if (this.starState === 'placed') {
       L.intensity += (1.6 - L.intensity) * Math.min(1, 3 * dt);
-      s.position.y = this.world.baseTop.y + 0.34 + Math.sin(this.time * 1.5) * 0.035;
+      s.position.y = this.world.baseTop.y + 0.30 + Math.sin(this.time * 1.5) * 0.025;
       s.rotation.y=.5+Math.sin(this.time*.6)*.12;
     }
   }
@@ -562,7 +614,7 @@ export class Story {
     if (this.state === 'placing') {
       this.placeT += dt;
       const k = THREE.MathUtils.smoothstep(this.placeT, .35, 2.15);
-      const to = this.world.baseTop.clone().add(new THREE.Vector3(0, .34, 0));
+      const to = this.world.baseTop.clone().add(new THREE.Vector3(0, .255, 0));
       const mid = this.placeFrom.clone().lerp(to, k);
       mid.y += Math.sin(k * Math.PI) * .42;
       this.star.position.copy(mid);
@@ -631,8 +683,14 @@ export class Story {
     } else if(this.state==='gag') {
       const axis=new THREE.Vector3().subVectors(this.f.pos,this.p.pos).setY(0).normalize();
       const side=new THREE.Vector3(-axis.z,0,axis.x);
-      goalPos=this.f.pos.clone().addScaledVector(axis,-4.25).addScaledVector(side,1.25).add(new THREE.Vector3(0,1.65,0));
-      goalLook=this.f.pos.clone().add(new THREE.Vector3(0,.52,0));
+      if (this.f.mode === 'peek') {
+        goalPos=this.f.pos.clone().addScaledVector(axis,-3.65).addScaledVector(side,1.15).add(new THREE.Vector3(0,1.5,0));
+        goalLook=this.f.pos.clone().add(new THREE.Vector3(0,.58,0));
+      } else {
+        const center=this.p.pos.clone().lerp(this.f.pos,.48);
+        goalPos=center.clone().addScaledVector(axis,-4.7).addScaledVector(side,2.2).add(new THREE.Vector3(0,2.25,0));
+        goalLook=center.add(new THREE.Vector3(0,.62,0));
+      }
     } else if(['placing','awakening'].includes(this.state) || (this.state==='finale' && this.pullbackT<0)) {
       goalPos=this.world.basePos.clone().add(new THREE.Vector3(3.4,2.5,8));
       goalLook=this.world.baseTop.clone().add(new THREE.Vector3(-.4,-.1,1.2));

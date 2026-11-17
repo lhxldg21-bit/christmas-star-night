@@ -127,7 +127,7 @@ export function buildWorld(scene, rand) {
   buildSky(scene, world, rand);
   buildPines(scene, world, rand, heightAt, path);
   buildSnowDrifts(scene, rand, heightAt, path);
-  buildPathDetails(scene, world, heightAt, path);
+  buildPathDetails(scene, world, rand, heightAt, path);
   buildLamps(scene, world, path, heightAt);
   buildCourtyard(scene, world, heightAt);
   buildDistantHills(scene, rand);
@@ -337,7 +337,7 @@ function buildSnowDrifts(scene, rand, heightAt, path) {
 }
 
 // —— 路径细节：近景折枝、雪堤和半埋木段，给镜头前后景与转弯提供支点 ——
-function buildPathDetails(scene, world, heightAt, path) {
+function buildPathDetails(scene, world, rand, heightAt, path) {
   const detail = new THREE.Group();
   const snowMat = mat(PALETTE.pineSnow);
   const barkMat = mat(0x6d594d);
@@ -451,6 +451,52 @@ function buildPathDetails(scene, world, heightAt, path) {
   detail.add(bank);
   world.foxHidePos = hideP.clone().addScaledVector(hideN, 2.95).addScaledVector(hideT, .22);
   world.foxHidePos.y = heightAt(world.foxHidePos.x, world.foxHidePos.z);
+
+  // Snow visibly falls from the low canopy above the hiding place. This makes
+  // the later nose-snow gag look caused by the world instead of random VFX.
+  const showerCount = 30;
+  const showerPos = new Float32Array(showerCount * 3);
+  const showerSeeds = [];
+  for (let i = 0; i < showerCount; i++) {
+    showerSeeds.push({
+      x: (rand() - .5) * .72,
+      z: (rand() - .5) * .5,
+      delay: rand() * .8,
+      speed: .55 + rand() * .55,
+    });
+    showerPos[i * 3] = showerSeeds[i].x;
+    showerPos[i * 3 + 1] = .78;
+    showerPos[i * 3 + 2] = showerSeeds[i].z;
+  }
+  const showerGeo = new THREE.BufferGeometry();
+  showerGeo.setAttribute('position', new THREE.BufferAttribute(showerPos, 3));
+  const shower = new THREE.Points(showerGeo, new THREE.PointsMaterial({
+    map: makeGlowTexture('#ffffff', '#ffffff00'),
+    color: 0xffffff, size: .065, transparent: true, opacity: .95, depthWrite: false,
+  }));
+  shower.position.copy(world.foxHidePos).add(new THREE.Vector3(0, .95, 0));
+  shower.visible = false;
+  scene.add(shower);
+  world.foxSnowfall = { points: shower, seeds: showerSeeds };
+
+  // The visible source of the ambush: a low, snow-heavy branch over the bank.
+  const branchRoot = hideP.clone().addScaledVector(hideN, 3.45).addScaledVector(hideT, -.85);
+  branchRoot.y = heightAt(branchRoot.x, branchRoot.z) + 2.05;
+  const branchTip = world.foxHidePos.clone().add(new THREE.Vector3(0, 1.55, 0));
+  const branchCurve = new THREE.CatmullRomCurve3([
+    branchRoot,
+    branchRoot.clone().lerp(branchTip, .45).add(new THREE.Vector3(0, .2, 0)),
+    branchTip,
+  ]);
+  const lowBranch = new THREE.Mesh(new THREE.TubeGeometry(branchCurve, 14, .055, 5, false), barkMat);
+  const lowBranchSnow = new THREE.Mesh(
+    new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(branchCurve.points.map((v) => v.clone().add(new THREE.Vector3(0, .04, 0)))),
+      14, .026, 5, false,
+    ),
+    snowMat,
+  );
+  detail.add(lowBranch, lowBranchSnow);
 
   scene.add(detail);
   world.pathDetails = detail;

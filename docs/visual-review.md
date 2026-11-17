@@ -1,6 +1,6 @@
 # Screenshot review contract
 Fixed viewport: 900 × 1100. Additional mobile check: 390 × 844.
-Deterministic URLs: ?capture=1&t=0,3,7.5,26,28,30,31,55,57,58,60,68,77.
+Deterministic URLs: ?capture=1&t=0,3,7.5,18,26,27,28,30,31,34,55,57,58,60,68,77.
 Each revision uses the same story times and viewport; shot compositions may be corrected as part of the implementation.
 Independent reviewer receives PNG paths only, with no code or implementation context. Severity: P1 severe, P2 medium, P3 minor. Iterate until reviewer reports no P1/P2.
 Static review cannot verify motion/audio; separately validate flow, transitions and build.
@@ -20,3 +20,11 @@ Static review cannot verify motion/audio; separately validate flow, transitions 
 - Placement beat: `07-place-ready.png` (55s), `08-place-approach.png` (57s), `09-place-contact.png` (58s), `10-star-awake.png` (60s). The placement prompt is distance-gated; triggering it makes the player walk to the pedestal, carry the star forward, and place it at a rest height above the top ring instead of pulling it in from far away.
 - Tone pass: one muted evergreen wreath on the cottage door and a berry collar/bell on the fox add Christmas specificity without turning the clean, lonely snowscape into a generic holiday scene.
 - v7 captures are stored in `/Users/sisichen/Documents/Codex/2026-11-17/i/outputs/christmas-review/v7/` at the current in-app 534×717 viewport.
+
+## v9 causal fox pass — 2026-11-17 23:05
+
+- Fox movement is now motivated in three stages: `waitAhead` when the player pauses (the fox stays in front and looks back), `invite` (a short face-the-player nod, tail wag and bounce), then a fast run to the snowbank. This removes the old unannounced sprint-back that read as a stalled game.
+- The snow now has a visible source: a low, snow-covered branch over the bank emits a local falling-particle shower before the larger clump reaches the fox’s nose. The resulting shake, snow burst and playful hop form one causal performance, and the walk-line toast waits until the fox has returned.
+- Placement is gated by real proximity rather than route progress. The player walks to the plinth, raises the star, and places it over 2.15 seconds. The final star scale/rest offset puts its lower point against the top ring instead of intersecting or floating above the pedestal.
+- Final review captures: `v9/00-first.png` through `15-letter.png` in the review output directory, covering first frame, wait/invite/cover/snow/shake/hop/return, placement, lighting, pullback and letter.
+- Remaining P3: stylized pine cones and snowbank facets repeat; the snow clump is intentionally graphic and slightly theatrical; live motion/audio and a trustworthy independent blind review are still required.
