@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>给TA的一场雪夜迎接 · 样片</title>
+<style>
+:root{
+  --snow:#f3eee6; --night:#141b3a; --night2:#27325e;
+  --amber:#ffb45e; --amber-soft:#ffd9a0; --berry:#b03048;
+  --ink:#2b2f4a; --paper:#f7f1e6;
+  --serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC",serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#0e1430}
+canvas{display:block;position:fixed;inset:0}
+#hud{position:fixed;left:10px;top:8px;color:#8b96b8;font:11px/1.4 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000;z-index:5}
+#ui{position:fixed;inset:0;pointer-events:none;z-index:10;font-family:var(--serif)}
+#ui>*{pointer-events:auto}
+.hide{display:none!important}
+
+/* 封面 */
+.cover{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(180deg,rgba(14,20,48,.62) 0%,rgba(20,27,58,.55) 55%,rgba(39,50,94,.66) 100%);
+  backdrop-filter:blur(2px);transition:opacity .9s ease,visibility .9s}
+.cover.hide{opacity:0;visibility:hidden;display:flex!important}
+.cover-box{text-align:center;color:var(--snow);padding:24px;max-width:32rem;animation:rise 1.2s ease both}
+.cover-kicker{letter-spacing:.55em;font-size:.8rem;color:var(--amber-soft);opacity:.9;margin-bottom:1.4rem}
+.cover-title{font-size:clamp(1.8rem,6vw,2.9rem);font-weight:600;line-height:1.5;margin:0 0 1.2rem;text-shadow:0 2px 24px rgba(255,180,94,.25)}
+.cover-sub{font-size:clamp(.95rem,3vw,1.1rem);line-height:2;color:#cfd6ee;margin:0 0 2.4rem}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+/* 按钮 */
+.btn-primary{font-family:var(--serif);font-size:1.05rem;letter-spacing:.2em;color:#3a2c14;
+  background:linear-gradient(180deg,var(--amber-soft),var(--amber));border:none;border-radius:999px;
+  padding:.85em 2.4em;cursor:pointer;box-shadow:0 4px 24px rgba(255,180,94,.35),inset 0 1px 0 #fff8;
+  transition:transform .2s,box-shadow .2s}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(255,180,94,.5),inset 0 1px 0 #fff8}
+.btn-primary.small{font-size:.95rem;padding:.7em 1.9em}
+.btn-ghost{font-family:var(--serif);font-size:.95rem;letter-spacing:.15em;color:var(--snow);
+  background:transparent;border:1px solid rgba(243,238,230,.45);border-radius:999px;
+  padding:.65em 1.7em;cursor:pointer;transition:background .2s}
+.btn-ghost:hover{background:rgba(243,238,230,.12)}
+
+/* 操作提示 */
+.prompt{position:absolute;left:50%;bottom:max(9vh,64px);transform:translateX(-50%);
+  font-family:var(--serif);font-size:1.05rem;letter-spacing:.25em;color:#3a2c14;
+  background:linear-gradient(180deg,var(--amber-soft),var(--amber));border:none;border-radius:999px;
+  padding:.8em 2.2em .8em 2.45em;cursor:pointer;
+  box-shadow:0 4px 24px rgba(255,180,94,.45);animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}
+
+/* 检视面板 */
+.inspect{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;
+  padding:0 20px max(5vh,36px);gap:14px;pointer-events:none!important}
+.inspect>*{pointer-events:auto}
+.note-card{background:var(--paper);color:var(--ink);border-radius:14px;padding:18px 22px 14px;
+  max-width:24rem;box-shadow:0 10px 40px rgba(10,14,36,.5);position:relative}
+.note-card::before{content:"";position:absolute;top:-7px;left:50%;width:14px;height:14px;
+  background:var(--paper);transform:translateX(-50%) rotate(45deg)}
+.note-text{font-size:1rem;line-height:1.9}
+.note-sign{text-align:right;color:#8a7a5c;font-size:.9rem;margin-top:8px}
+.inspect-actions{display:flex;gap:14px;align-items:center}
+.inspect-hint{color:#9aa4c8;font-size:.78rem;letter-spacing:.1em}
+
+/* 途中话语 */
+.toast{position:absolute;top:12vh;left:50%;transform:translateX(-50%);max-width:min(26rem,86vw);
+  background:rgba(20,27,58,.72);color:var(--snow);border:1px solid rgba(255,212,160,.25);
+  border-radius:14px;padding:12px 20px;font-size:.95rem;line-height:1.8;text-align:center;
+  backdrop-filter:blur(6px);animation:rise .6s ease both}
+
+/* 信件 */
+.letter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(10,14,36,.55);backdrop-filter:blur(3px);animation:fadein 1.2s ease both;padding:20px}
+.letter-paper{background:var(--paper);color:var(--ink);border-radius:16px;max-width:30rem;width:100%;
+  max-height:78vh;overflow-y:auto;padding:34px 30px 26px;box-shadow:0 24px 80px rgba(0,0,0,.55);
+  -webkit-overflow-scrolling:touch}
+.letter-to{font-size:1.15rem;margin-bottom:16px;color:#5a4a6a}
+.letter-body{white-space:pre-wrap;font-size:1.05rem;line-height:2.15}
+.letter-paper .btn-primary{display:block;margin:26px auto 0}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+
+/* 结束卡 */
+.end{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(10,14,36,.6);backdrop-filter:blur(4px);animation:fadein .8s ease both;padding:20px}
+.end-box{text-align:center;color:var(--snow);max-width:30rem}
+.end-title{font-size:1.5rem;letter-spacing:.2em;margin-bottom:14px;color:var(--amber-soft)}
+.end-sub{font-size:.92rem;line-height:2;color:#c3cbE8;color:#c3cbe8}
+.end-links{display:flex;gap:22px;justify-content:center;margin-top:22px}
+.end-links a,.badge a{color:var(--amber-soft);text-decoration:none;border-bottom:1px dashed rgba(255,217,160,.5);font-size:.95rem}
+
+/* 声音控制 */
+.sound-bar{position:absolute;top:max(12px,env(safe-area-inset-top));right:14px;display:flex;align-items:center;gap:10px;
+  background:rgba(20,27,58,.5);border:1px solid rgba(243,238,230,.14);border-radius:999px;
+  padding:6px 12px;backdrop-filter:blur(6px)}
+.icon-btn{background:none;border:none;font-size:1rem;cursor:pointer;padding:2px}
+.vol{display:flex;align-items:center;gap:5px;color:#aab4d6;font-size:.72rem;letter-spacing:.1em}
+.vol input{width:56px;accent-color:var(--amber);height:2px}
+
+/* 配置徽标 */
+.badge{position:absolute;left:14px;bottom:max(12px,env(safe-area-inset-bottom));color:#8b96b8;font-size:.75rem;letter-spacing:.08em}
+
+/* 淡入 */
+.fade{position:absolute;inset:0;background:#0e1430;opacity:0;pointer-events:none;transition:opacity 1.4s ease}
+.fade.show-soft{opacity:1}
+
+@media (max-width:640px){
+  .vol input{width:40px}
+  .sound-bar{gap:7px;padding:5px 10px}
+  .note-card{max-width:20rem}
+}
+/* Quiet, paper-like interface; preserve the image above the reading area. */
+.sound-bar{display:block;border:none;background:rgba(17,31,44,.46);border-radius:6px;padding:10px 14px;color:#e6e5de;font-size:12px;letter-spacing:.15em}
+.sound-toggle{cursor:pointer;list-style:none}.sound-toggle::-webkit-details-marker{display:none}
+.sound-bar[open]{display:flex;gap:12px;align-items:center}
+.note-card{border-radius:3px;box-shadow:0 8px 28px #0a142055;max-width:430px;padding:22px 28px;border-top:2px solid #b79765;background:#f8eee0}
+.note-card:before{display:none}.note-kicker{font-size:11px;letter-spacing:.24em;color:#8a775b;margin-bottom:12px}
+.note-text{font-size:16px;line-height:1.9;color:#342b25}.note-sign{font-size:13px;color:#675746}
+.inspect{padding-bottom:30px;gap:12px;background:linear-gradient(0deg,#102033b0,transparent);padding-top:22px}
+.btn-primary,.btn-primary.small,.prompt{background:#e6cca0;border:1px solid #f3dfb8;border-radius:4px;box-shadow:0 4px 18px #13213022;font-size:14px;letter-spacing:.13em;padding:12px 24px;animation:none}
+.btn-ghost{border-radius:4px;padding:11px 22px;font-size:14px;background:#24394c80}
+.inspect-hint{color:#d6dfe5;font-size:11px}.toast{top:auto;bottom:9vh;background:#172d40c7;border-radius:4px;font-size:14px}
+.journey-hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;letter-spacing:.14em;color:#f3eee6;text-shadow:0 1px 6px #102030;background:#1d35486b;padding:9px 16px;border-radius:4px;pointer-events:none!important}
+.letter{background:#12213340;backdrop-filter:none;align-items:flex-end;padding-bottom:42px}
+.letter-paper{border-radius:3px;max-height:52vh;box-shadow:0 16px 40px #07152266;border-top:2px solid #b9a17b;background:#f8efe2}
+.letter-body{font-size:15px;line-height:2}.letter-to{font-size:17px}
+@media(max-width:500px){.note-card{padding:16px 20px}.note-text{font-size:14px}.inspect{padding:14px 20px 22px}.note-kicker{margin-bottom:8px}.note-sign{margin-top:5px}.letter-paper{padding:22px;max-height:55vh}.sound-bar{font-size:11px}.journey-hint{font-size:11px;bottom:22px}}
+</style>
+  <script type="module" crossorigin src="./assets/index-Ca7XdFOv.js"></script>
+</head>
+<body>
+<div id="hud"></div>
+<div id="ui"></div>
+</body>
+</html>
