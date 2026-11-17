@@ -1,0 +1,560 @@
+// 故事状态机：封面 → 拾星检视 → 狐狸带路/折返/等候 → 雪落鼻尖 → 并肩 →
+// 抵达安放 → 逐盏点灯 → 拉镜看足迹 → 信件。
+// 所有状态推进只依赖固定步长 dt 与意图队列，自动脚本（capture/demo）与
+// 真实点击走同一条代码路径，因此 __seek(t) 可以确定性重放整条旅程。
+import * as THREE from 'three';
+import { PALETTE } from './world.js';
+
+const STEP = 1 / 60;
+
+// —— 脚印池：贴地椭圆印记，落地时生成，方向跟随朝向 ——
+class FootprintPool {
+  constructor(scene, world, { w, h, color, opacity, max }) {
+    this.world = world;
+    this.max = max;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const ctx = cv.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 32, 4, 32, 32, 30);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.save();
+    ctx.translate(32, 32);
+    ctx.scale(1, 0.62);
+    ctx.beginPath();
+    ctx.arc(0, 0, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.mesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false }),
+      max,
+    );
+    this.mesh.count = 0;
+    this.mesh.renderOrder = 1;
+    this.head = 0;
+    scene.add(this.mesh);
+    this._m = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._e = new THREE.Euler();
+    this._s = new THREE.Vector3(1, 1, 1);
+  }
+  spawn(x, z, yaw) {
+    const y = this.world.heightAt(x, z) + 0.025;
+    this._e.set(-Math.PI / 2, 0, -yaw);
+    this._q.setFromEuler(this._e);
+    this._m.compose(new THREE.Vector3(x, y, z), this._q, this._s);
+    const i = this.head % this.max;
+    this.mesh.setMatrixAt(i, this._m);
+    this.head++;
+    this.mesh.count = Math.min(this.head, this.max);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+  clear() {
+    this.head = 0;
+    this.mesh.count = 0;
+  }
+}
+
+export class Story {
+  constructor({ scene, world, player, fox, star, config, audio, ui, auto }) {
+    Object.assign(this, { scene, world, player, fox, star, config, audio, ui, auto });
+    this.prints = new FootprintPool(scene, world, { w: 0.17, h: 0.34, color: 'rgba(96,112,160,0.85)', opacity: 0.95, max: 500 });
+    this.paws = new FootprintPool(scene, world, { w: 0.09, h: 0.12, color: 'rgba(96,112,160,0.75)', opacity: 0.9, max: 500 });
+    this.reset();
+  }
+
+  reset() {
+    const w = this.world;
+    this.time = 0;
+    this.state = this.auto ? 'walk' : 'cover'; // capture/demo 自动跳过封面
+    this.starState = 'ground';
+    this.prints.clear();
+    this.paws.clear();
+
+    // 出生点：入口树枝拱下
+    const start = w.path.curve.getPointAt(0.0);
+    this.p = {
+      pos: new THREE.Vector3(start.x, 0, start.z + 1.6),
+      yaw: Math.PI, // 面向 -z（路径方向）
+      target: null,
+      stride: 0,
+      side: 1,
+      phase: 0,
+      moving: 0,
+      idleTime: 0,
+    };
+    this.p.pos.y = w.heightAt(this.p.pos.x, this.p.pos.z);
+
+    const starPt = w.path.curve.getPointAt(0.06);
+    this.starGroundPos = new THREE.Vector3(starPt.x - 0.5, 0, starPt.z + 0.4);
+    this.starGroundPos.y = w.heightAt(this.starGroundPos.x, this.starGroundPos.z) + 0.22;
+
+    const foxPt = w.path.curve.getPointAt(0.075);
+    this.f = {
+      pos: new THREE.Vector3(foxPt.x + 0.8, 0, foxPt.z - 0.15),
+      yaw: 0,
+      mode: 'guard',
+      stride: 0,
+      side: 1,
+      phase: 0,
+      moving: 0,
+      sitting: 1,
+      waitTimer: 0,
+      gagDone: false,
+      gagT: -1,
+      returnedOnce: false,
+    };
+    this.f.pos.y = w.heightAt(this.f.pos.x, this.f.pos.z);
+
+    this.star.position.copy(this.starGroundPos);
+    this.star.rotation.set(0.15, 0.3, 0);
+    this.starScale = 1;
+    this.inspect = { yaw: 0.3, pitch: 0.15, anchor: new THREE.Vector3(), active: false };
+
+    this.camMode = 'follow';
+    this.camPos = new THREE.Vector3();
+    this.camLook = new THREE.Vector3();
+    this.camInit = false;
+    this.pullbackT = -1;
+    this.placeT = -1;
+    this.letterT = -1;
+    this.fadeT = -1;
+    this.lampTimer = -1;
+    this.lampsLit = 0;
+    this.toastUntil = -1;
+    this.intents = [];
+    this.autoScript = this.auto ? buildAutoScript() : [];
+    // 灯与底座复位（重放/循环用）
+    for (const lamp of this.world.lamps) {
+      lamp.lit = 0;
+      lamp.bulbMat.emissiveIntensity = 0.06;
+      lamp.glow.material.opacity = 0;
+      lamp.pool.material.opacity = 0;
+    }
+    this.world.baseLight.intensity = 0.35;
+    this.fox.parts.headPivot.rotation.set(0, 0, 0);
+    if (this.ui && this.ui.resetTransient) this.ui.resetTransient();
+    this._syncUi();
+  }
+
+  // —— 外部意图（真实点击或自动脚本）——
+  queueIntent(intent) { this.intents.push(intent); }
+
+  _progress(pos) {
+    // 沿路进度 0~1（最近采样点）
+    const s = this.world.path.samples;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < s.length; i++) {
+      const d = (s[i].x - pos.x) ** 2 + (s[i].z - pos.z) ** 2;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best / (s.length - 1);
+  }
+
+  update(dt) {
+    this.time += dt;
+    // 自动脚本到点发意图
+    if (this.auto) {
+      for (const a of this.autoScript) {
+        if (!a.fired && this.time >= a.t) { a.fired = true; this.intents.push(a.intent); }
+      }
+    }
+    // 处理意图
+    while (this.intents.length) {
+      const it = this.intents.shift();
+      this._handleIntent(it);
+    }
+
+    this._updatePlayer(dt);
+    this._updateFox(dt);
+    this._updateStar(dt);
+    this._updateBeats(dt);
+    this._syncUi();
+  }
+
+  _handleIntent(it) {
+    switch (it.type) {
+      case 'start':
+        if (this.state === 'cover') { this.state = 'walk'; this.audio.setLayer(0); }
+        break;
+      case 'move':
+        if (this.state === 'walk') {
+          // 限定可行走范围：以路径（含底座）为中心的走廊，超出则压回边缘
+          const corridor = this.world.path.samples.concat([this.world.basePos]);
+          let bd = Infinity, bx = it.x, bz = it.z;
+          for (const s of corridor) {
+            const d = (s.x - it.x) ** 2 + (s.z - it.z) ** 2;
+            if (d < bd) { bd = d; bx = s.x; bz = s.z; }
+          }
+          bd = Math.sqrt(bd);
+          const R = 3.0;
+          let x = it.x, z = it.z;
+          if (bd > R) {
+            x = bx + ((it.x - bx) / bd) * R;
+            z = bz + ((it.z - bz) / bd) * R;
+          }
+          this.p.target = new THREE.Vector3(x, 0, z);
+        }
+        break;
+      case 'pickup':
+        if (this.state === 'walk' && this.starState === 'ground' &&
+            this.p.pos.distanceTo(this.starGroundPos) < 2.2) {
+          this.state = 'inspect';
+          this.starState = 'inspect';
+          this.inspect.active = true;
+          this.inspect.yaw = 0.3; this.inspect.pitch = 0.15;
+          this.audio.chime();
+        }
+        break;
+      case 'flip':
+        if (this.state === 'inspect') { this.inspect.yaw += Math.PI; this.audio.chime(); }
+        break;
+      case 'continue':
+        if (this.state === 'inspect') {
+          this.state = 'walk';
+          this.starState = 'carried';
+          this.inspect.active = false;
+          if (this.f.mode === 'guard') this.f.mode = 'lead';
+          this.audio.setLayer(1);
+        }
+        break;
+      case 'place':
+        if (this.state === 'walk' && this.starState === 'carried' &&
+            this._progress(this.p.pos) > 0.86) {
+          this.state = 'placing';
+          this.starState = 'placing';
+          this.placeT = 0;
+          this.placeFrom = this.star.position.clone();
+          this.audio.placeStar();
+        }
+        break;
+    }
+  }
+
+  _updatePlayer(dt) {
+    const p = this.p;
+    const SPEED = 1.75, STRIDE = 0.52;
+    if (p.target && this.state === 'walk') {
+      const dx = p.target.x - p.pos.x, dz = p.target.z - p.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.08) {
+        p.target = null;
+      } else {
+        const desiredYaw = Math.atan2(dx, dz);
+        p.yaw = dampAngle(p.yaw, desiredYaw, 8, dt);
+        const step = Math.min(SPEED * dt, dist);
+        p.pos.x += Math.sin(p.yaw) * step;
+        p.pos.z += Math.cos(p.yaw) * step;
+        p.moving = Math.min(1, p.moving + dt * 6);
+        p.idleTime = 0;
+        p.phase += step * 3.4;
+        p.stride += step;
+        if (p.stride >= STRIDE) {
+          p.stride -= STRIDE;
+          p.side *= -1;
+          const px = -Math.cos(p.yaw) * 0.11 * p.side;
+          const pz = Math.sin(p.yaw) * 0.11 * p.side;
+          this.prints.spawn(p.pos.x + px, p.pos.z + pz, p.yaw);
+          this.audio.footstep('player', 0);
+        }
+      }
+    } else {
+      p.moving = Math.max(0, p.moving - dt * 5);
+      p.idleTime += dt;
+    }
+    p.pos.y = this.world.heightAt(p.pos.x, p.pos.z);
+    const g = this.player.group;
+    g.position.copy(p.pos);
+    g.rotation.y = p.yaw;
+    this.player.pose(p.phase, p.moving, this.time);
+  }
+
+  _updateFox(dt) {
+    const f = this.f;
+    const path = this.world.path;
+    const RUN = 2.7, WALK = 1.9;
+    let target = null, speed = RUN;
+
+    if (f.mode === 'guard') {
+      f.sitting = Math.min(1, f.sitting + dt * 4);
+      // 看着玩家
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      f.moving = Math.max(0, f.moving - dt * 5);
+    } else if (f.mode === 'lead') {
+      const pr = Math.min(this._progress(this.p.pos) + 0.16, 0.95);
+      target = path.curve.getPointAt(pr);
+      speed = RUN;
+      f.sitting = Math.max(0, f.sitting - dt * 6);
+      const distToPlayer = f.pos.distanceTo(this.p.pos);
+      // 跑太远了，或玩家停下太久 → 折返
+      if (distToPlayer > 5.2 || (this.p.idleTime > 1.6 && distToPlayer > 3)) {
+        f.mode = 'return';
+      }
+    } else if (f.mode === 'return') {
+      target = this.p.pos.clone();
+      const away = new THREE.Vector3().subVectors(f.pos, this.p.pos).setY(0);
+      if (away.lengthSq() > 0.001) target.add(away.normalize().multiplyScalar(1.1));
+      speed = RUN;
+      if (f.pos.distanceTo(target) < 0.35) {
+        f.mode = 'wait';
+        f.waitTimer = 0;
+        f.returnedOnce = true;
+      }
+    } else if (f.mode === 'wait') {
+      f.sitting = Math.min(1, f.sitting + dt * 4);
+      f.moving = Math.max(0, f.moving - dt * 5);
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      if (this.p.moving > 0.5) f.mode = 'lead';
+    } else if (f.mode === 'gag') {
+      f.gagT += dt;
+      f.sitting = Math.max(0, f.sitting - dt * 6);
+      f.moving = 0;
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
+      if (f.gagT > 0.4 && f.gagT < 1.7) {
+        this.fox.shakeHead((f.gagT - 0.4) / 1.3);
+      }
+      if (f.gagT >= 2.2) {
+        f.mode = 'alongside';
+        this.toastUntil = this.time + 3.6;
+      }
+    } else if (f.mode === 'alongside') {
+      const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(1.05);
+      const ahead = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw)).multiplyScalar(0.35);
+      target = this.p.pos.clone().add(side).add(ahead);
+      speed = this.p.moving > 0.1 ? Math.max(WALK, Math.min(RUN, this.p.moving * 2.2)) : WALK;
+      f.sitting = this.p.moving > 0.1 ? Math.max(0, f.sitting - dt * 6) : Math.min(1, f.sitting + dt * 3);
+      if (this._progress(this.p.pos) > 0.88) f.mode = 'arrive';
+    } else if (f.mode === 'arrive') {
+      const b = this.world.basePos;
+      target = new THREE.Vector3(b.x + 1.5, 0, b.z + 1.2);
+      speed = RUN;
+      if (f.pos.distanceTo(target) < 0.3) {
+        f.mode = 'arrive-sit';
+      }
+    } else if (f.mode === 'arrive-sit') {
+      f.sitting = Math.min(1, f.sitting + dt * 4);
+      f.moving = Math.max(0, f.moving - dt * 5);
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
+    }
+
+    if (target && f.mode !== 'gag') {
+      const dx = target.x - f.pos.x, dz = target.z - f.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.06) {
+        const desiredYaw = Math.atan2(dx, dz);
+        f.yaw = dampAngle(f.yaw, desiredYaw, 9, dt);
+        const step = Math.min(speed * dt, dist);
+        f.pos.x += Math.sin(f.yaw) * step;
+        f.pos.z += Math.cos(f.yaw) * step;
+        f.moving = Math.min(1, f.moving + dt * 7);
+        f.phase += step * 7.5;
+        f.stride += step;
+        const FSTRIDE = 0.3;
+        if (f.stride >= FSTRIDE) {
+          f.stride -= FSTRIDE;
+          f.side *= -1;
+          const px = -Math.cos(f.yaw) * 0.06 * f.side;
+          const pz = Math.sin(f.yaw) * 0.06 * f.side;
+          this.paws.spawn(f.pos.x + px, f.pos.z + pz, f.yaw);
+          this.audio.footstep('fox', f.pos.distanceTo(this.p.pos));
+        }
+      } else {
+        f.moving = Math.max(0, f.moving - dt * 6);
+      }
+    } else if (f.mode !== 'gag') {
+      f.moving = Math.max(0, f.moving - dt * 6);
+    }
+
+    // 雪落鼻尖桥段：玩家进度过 0.42 且未触发过
+    if (!f.gagDone && f.mode === 'lead' && this._progress(this.p.pos) > 0.42) {
+      f.gagDone = true;
+      f.mode = 'gag';
+      f.gagT = 0;
+    }
+
+    f.pos.y = this.world.heightAt(f.pos.x, f.pos.z);
+    const g = this.fox.group;
+    g.position.copy(f.pos);
+    g.rotation.y = f.yaw - Math.PI / 2; // 模型朝 +x 建模
+    this.fox.pose(f.phase, f.moving, f.sitting, this.time);
+  }
+
+  _updateStar(dt) {
+    const s = this.star;
+    const targetScale = this.starState === 'inspect' ? 1.5 : 1;
+    const sc = s.scale.x + (targetScale - s.scale.x) * Math.min(1, 6 * dt);
+    s.scale.setScalar(sc);
+    const L = s.userData.light;
+    if (this.starState === 'ground') {
+      L.intensity = 1.1;
+      s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
+      s.rotation.y += dt * 0.6;
+    } else if (this.starState === 'inspect') {
+      s.position.lerp(this.inspect.anchor, 1 - Math.exp(-8 * dt));
+      s.rotation.y = dampAngle(s.rotation.y, this.inspect.yaw, 10, dt);
+      s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
+      s.rotation.z *= 1 - Math.min(1, 8 * dt);
+    } else if (this.starState === 'carried') {
+      L.intensity += (0.7 - L.intensity) * Math.min(1, 4 * dt);
+      const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(0.55);
+      const goal = this.p.pos.clone().add(side).add(new THREE.Vector3(0, 1.05 + Math.sin(this.time * 2.2) * 0.04, 0));
+      s.position.lerp(goal, 1 - Math.exp(-6 * dt));
+      s.rotation.y += dt * 0.9;
+      s.rotation.x *= 1 - Math.min(1, 5 * dt);
+    } else if (this.starState === 'placed') {
+      L.intensity += (1.6 - L.intensity) * Math.min(1, 3 * dt);
+      s.position.y = this.world.baseTop.y + 0.12 + Math.sin(this.time * 1.5) * 0.05;
+      s.rotation.y += dt * 0.7;
+    }
+  }
+
+  _updateBeats(dt) {
+    // 安放动画
+    if (this.state === 'placing') {
+      this.placeT += dt;
+      const k = Math.min(this.placeT / 1.4, 1);
+      const e = 1 - (1 - k) * (1 - k);
+      const to = this.world.baseTop.clone().add(new THREE.Vector3(0, 0.12, 0));
+      const mid = this.placeFrom.clone().lerp(to, e);
+      mid.y += Math.sin(e * Math.PI) * 0.9;
+      this.star.position.copy(mid);
+      this.star.userData.light.intensity = 1.1 + e * 2.2;
+      if (k >= 1) {
+        this.starState = 'placed';
+        this.state = 'finale';
+        this.lampTimer = 0;
+        this.lampsLit = 0;
+        this.audio.setLayer(2);
+      }
+      return;
+    }
+    // 点灯：从底座向外沿路逐盏
+    if (this.state === 'finale') {
+      if (this.lampTimer >= 0 && this.lampsLit < this.world.lamps.length) {
+        this.lampTimer += dt;
+        const idx = Math.floor(this.lampTimer / 0.45);
+        while (this.lampsLit <= idx && this.lampsLit < this.world.lamps.length) {
+          // 从离底座最近（索引大）的开始
+          const lamp = this.world.lamps[this.world.lamps.length - 1 - this.lampsLit];
+          lamp.lit = 1;
+          this.audio.lampPing(this.lampsLit);
+          this.lampsLit++;
+        }
+        if (this.lampsLit >= this.world.lamps.length) {
+          this.lampTimer = -1;
+          this.pullbackT = 0;
+        }
+      }
+      // 灯的渐变
+      for (const lamp of this.world.lamps) {
+        if (lamp.lit > 0 && lamp.lit < 1.01) {
+          lamp.lit = Math.min(1.01, lamp.lit + dt * 1.6);
+          const k = Math.min(lamp.lit, 1);
+          lamp.bulbMat.emissiveIntensity = 0.06 + k * 1.6;
+          lamp.glow.material.opacity = k * 0.85;
+          lamp.pool.material.opacity = k * 0.75;
+        }
+      }
+      this.world.baseLight.intensity = 0.35 + Math.min(1, (this.pullbackT >= 0 ? this.pullbackT : 0.2)) * 1.1;
+      // 拉镜完成后出信
+      if (this.pullbackT >= 0) {
+        this.pullbackT += dt;
+        if (this.pullbackT > 3.6 && this.letterT < 0) {
+          this.letterT = 0;
+          this.state = 'letter';
+          this.audio.setLayer(3);
+          this.ui.showLetter(this.config);
+        }
+      }
+    }
+  }
+
+  // —— 相机 ——
+  applyCamera(camera, dt) {
+    const k = dt ? 1 - Math.exp(-3.2 * dt) : 1;
+    let goalPos, goalLook;
+    if (this.state === 'inspect') {
+      // 检视：侧向构图——人物在画面左缘，星星在右侧中央，不被帽子挡住
+      const fwd = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw));
+      const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+      this.inspect.anchor.copy(this.p.pos)
+        .add(fwd.clone().multiplyScalar(0.85))
+        .add(right.clone().multiplyScalar(0.45))
+        .add(new THREE.Vector3(0, 1.32, 0));
+      goalPos = this.p.pos.clone()
+        .add(fwd.clone().multiplyScalar(-0.55))
+        .add(right.clone().multiplyScalar(-1.35))
+        .add(new THREE.Vector3(0, 1.5, 0));
+      goalLook = this.inspect.anchor;
+    } else if ((this.state === 'finale' || this.state === 'letter') && this.pullbackT >= 0) {
+      // 拉镜：升到能看见整条路、两串足迹与小院的广角
+      const t = Math.min(this.pullbackT / 3.2, 1);
+      const e = t * t * (3 - 2 * t);
+      const b = this.world.basePos;
+      const near = this.p.pos.clone().add(new THREE.Vector3(0, 2.9, 4.4));
+      const far = new THREE.Vector3(b.x + 8.8, 13.5, b.z + 23.5);
+      goalPos = near.lerp(far, e);
+      goalLook = new THREE.Vector3(b.x, 1.0, b.z).lerp(new THREE.Vector3(-0.5, 0.2, -5), e);
+    } else {
+      // 跟随：路径方向后上方，半固定
+      const pr = Math.max(0.02, this._progress(this.p.pos));
+      const tangent = this.world.path.curve.getTangentAt(Math.min(pr, 0.99));
+      const back = tangent.clone().multiplyScalar(-4.6);
+      back.y = 3.1;
+      goalPos = this.p.pos.clone().add(back);
+      goalLook = this.p.pos.clone().add(tangent.clone().multiplyScalar(1.8)).add(new THREE.Vector3(0, 0.85, 0));
+    }
+    if (!this.camInit) {
+      this.camPos.copy(goalPos);
+      this.camLook.copy(goalLook);
+      this.camInit = true;
+    } else {
+      this.camPos.lerp(goalPos, k);
+      this.camLook.lerp(goalLook, k);
+    }
+    camera.position.copy(this.camPos);
+    camera.lookAt(this.camLook);
+  }
+
+  // —— UI 同步（每步调用，DOM 只在变化时写）——
+  _syncUi() {
+    const nearStar = this.starState === 'ground' && this.p.pos.distanceTo(this.starGroundPos) < 2.2;
+    const nearBase = this.starState === 'carried' && this._progress(this.p.pos) > 0.86;
+    if (!this.ui) return;
+    this.ui.setPrompt(
+      this.state === 'walk' && nearStar ? '拾起星星' :
+      this.state === 'walk' && nearBase ? '安放星星' : null,
+    );
+    this.ui.setInspect(this.state === 'inspect', this.config);
+    this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
+  }
+}
+
+function dampAngle(a, b, lambda, dt) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * (1 - Math.exp(-lambda * dt));
+}
+
+// —— 自动样片脚本：与真实点击同路径，确定性覆盖全部验收点 ——
+function buildAutoScript() {
+  const mv = (x, z) => ({ type: 'move', x, z });
+  return [
+    { t: 0.4, intent: { type: 'start' } },
+    { t: 0.8, intent: mv(-1.6, 7.2) },        // 走向星星
+    { t: 4.4, intent: { type: 'pickup' } },   // 拾起
+    { t: 5.2, intent: { type: 'flip' } },     // 翻面看短句
+    { t: 8.2, intent: { type: 'continue' } }, // 继续走
+    { t: 8.6, intent: mv(-3.2, 2.6) },        // 走一段
+    // 11.9 ~ 14.6 主动停下：狐狸跑远 → 折返 → 坐下等候
+    { t: 14.6, intent: mv(-1.4, -1.6) },      // 继续，途中触发雪落鼻尖
+    { t: 19.4, intent: mv(1.2, -6.6) },       // 并肩同行
+    { t: 23.4, intent: mv(0.3, -10.6) },      // 抵达小院
+    { t: 27.2, intent: { type: 'place' } },   // 安放星星
+  ];
+}
