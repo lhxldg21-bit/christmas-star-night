@@ -46,6 +46,17 @@ export class UI {
 
   _buildPrompt() {
     this.prompt = this._el('button', 'prompt hide');
+    this.wishHint = this._el('div', 'wish-hint hide', null, '可按住许愿，松开放上星星');
+    this.wishHint.id = 'wish-hint';
+    this.prompt.addEventListener('pointerdown', (event) => {
+      if (event.button === 0 && this._cache.prompt === '安放星星') {
+        this.onIntent({ type: 'wish', active: true });
+      }
+    });
+    const stopWishing = () => this.onIntent({ type: 'wish', active: false });
+    this.prompt.addEventListener('pointercancel', stopWishing);
+    this.prompt.addEventListener('pointerleave', stopWishing);
+    this.prompt.addEventListener('pointerup', stopWishing);
     this.prompt.addEventListener('click', () => {
       const label = this.prompt.textContent;
       if (label === '拾起星星') this.onIntent({ type: 'pickup' });
@@ -89,7 +100,20 @@ export class UI {
 
   _buildLetter() {
     this.letter = this._el('div', 'letter hide');
-    const paper = this._el('div', 'letter-paper', this.letter);
+    this.envelope = this._el('div', 'letter-envelope', this.letter);
+    this._el('p', 'envelope-to', this.envelope, `给 ${esc(this.config.toName)}`);
+    const seal = this._el('button', 'letter-seal', this.envelope, '✦');
+    seal.setAttribute('aria-label', '拆开这封信');
+    this._el('p', 'envelope-hint', this.envelope, '点火漆拆信');
+    const paper = this._el('div', 'letter-paper hide', this.letter);
+    seal.addEventListener('click', () => {
+      this.audio.chime();
+      this.envelope.classList.add('hide');
+      paper.classList.remove('hide');
+      paper.scrollTop = 0;
+      paper.focus({preventScroll: true});
+    });
+    paper.tabIndex = -1;
     // 买家整封重写时信里可能已带称呼，避免重复
     const firstLine = this.config.letter.trimStart().slice(0, 12);
     if (!firstLine.includes(this.config.toName)) {
@@ -210,10 +234,13 @@ export class UI {
   // —— 每帧同步接口（幂等）——
   setPrompt(label) {
     this._toggle(this.prompt, !!label);
-    if (label && this._cache.prompt !== label) {
-      this._cache.prompt = label;
-      this.prompt.textContent = label;
-    }
+    if (this._cache.prompt === label) return;
+    this._cache.prompt = label;
+    if (label) this.prompt.textContent = label;
+    const canWish = label === '安放星星';
+    this._toggle(this.wishHint, canWish);
+    if (canWish) this.prompt.setAttribute('aria-describedby', this.wishHint.id);
+    else this.prompt.removeAttribute('aria-describedby');
   }
 
   setInspect(active, config=this.config, flipped=false, flippedOnce=false) {
@@ -263,7 +290,8 @@ export class UI {
 
   showLetter() {
     this.letter.classList.remove('hide');
-    this.letter.querySelector('.letter-paper').scrollTop = 0;
+    this.envelope.classList.remove('hide');
+    this.letter.querySelector('.letter-paper').classList.add('hide');
   }
 
   _toggle(el, show) {

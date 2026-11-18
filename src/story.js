@@ -144,6 +144,8 @@ export class Story {
     this.toastUntil = -1;
     this.flippedOnce = false;
     this.holdWalk = false;
+    this.wishing = false;
+    this.wishGlow = 0;
     this.lookActive = false;
     this.foxReactT = -1;
     this.stealT = -1;
@@ -264,6 +266,9 @@ export class Story {
           this.audio.setLayer(1);
         }
         break;
+      case 'wish':
+        this.wishing = it.active;
+        break;
       case 'place':
         if (this.state === 'walk' && this.starState === 'carried' &&
             this.p.pos.distanceTo(this.world.basePos) < 3.7) {
@@ -369,11 +374,14 @@ export class Story {
         f.offered = true;
       }
     } else if (f.mode === 'lead') {
-      const pr = Math.min(this._progress(this.p.pos) + 0.106, 0.98);
+      const playerProgress = this._progress(this.p.pos);
+      // Wait at the bend long enough for the player to catch up.
+      const leadLimit = playerProgress < .48 ? .52 : .98;
+      const pr = Math.min(playerProgress + .106, leadLimit);
       target = path.curve.getPointAt(pr);
       const tangent = path.curve.getTangentAt(pr);
       target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.83));
-      if (this._progress(this.p.pos) > .89) f.mode = 'arrive';
+      if (playerProgress > .89) f.mode = 'arrive';
       speed = 2.1;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       const distToPlayer = f.pos.distanceTo(this.p.pos);
@@ -526,6 +534,7 @@ export class Story {
       view.lerp(cameraForward, carryBlend).normalize();
     }
     const viewSide = new THREE.Vector3(-view.z, 0, view.x);
+    this.wishGlow = THREE.MathUtils.damp(this.wishGlow, this.wishing && this.state === 'walk' ? 1 : 0, 3, dt);
     const lantern = this.starState === 'carried' && this.state !== 'gag';
     this.inspect.anchor.copy(this.p.pos).addScaledVector(view, lantern ? .82 : .96)
       .addScaledVector(viewSide, lantern ? -.34 : (this.state === 'gag' ? -.16 : -.15))
@@ -540,7 +549,7 @@ export class Story {
     }
     if (patch.visible) patch.position.y = this.world.heightAt(patch.position.x, patch.position.z) + .045;
     s.userData.halo.material.opacity=this.starState==='placed' ? .65 : (lantern ? .2 : .12);
-    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.12 : (this.starState==='carried' ? .85 : .8);
+    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.12 : (this.starState==='carried' ? .85 + this.wishGlow * 1.1 : .8);
     if (this.starState === 'ground') {
       L.intensity = 2.4;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
@@ -551,7 +560,7 @@ export class Story {
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
-      L.intensity += (0.7 - L.intensity) * Math.min(1, 4 * dt);
+      L.intensity += (0.7 + this.wishGlow * 1.9 - L.intensity) * Math.min(1, 4 * dt);
       const goal = this.inspect.anchor;
       s.position.lerp(goal, 1 - Math.exp(-6 * dt));
       const sweep = this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, .30, 1.4) : 1;
@@ -753,8 +762,8 @@ function buildAutoScript() {
   return [
     {t:.4,intent:{type:'start'}},{t:2.1,intent:{type:'advance'}},
     {t:5.15,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
-    {t:12,intent:{type:'continue'}}, route(17,.20),
-    route(23,.43),route(32,.60),route(40,.75),route(46,.88),route(51,1),
-    {t:56,intent:{type:'place'}},
+    {t:12,intent:{type:'continue'}}, route(18,.20),
+    route(24,.43),route(33,.60),route(41,.75),route(47,.88),route(53,1),
+    {t:59,intent:{type:'place'}},
   ];
 }

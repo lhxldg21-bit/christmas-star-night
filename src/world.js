@@ -3,14 +3,14 @@
 import * as THREE from 'three';
 
 export const PALETTE = {
-  snow: 0xf3eee6,
+  snow: 0xe8ecf4,
   snowShade: 0xdfe4f2,
-  nightTop: 0x10152d,
-  nightHorizon: 0x3c4b71,
+  nightTop: 0x0b1026,
+  nightHorizon: 0x615782,
   amber: 0xffb45e,
   starAmber: 0xffd27a,
   berry: 0xb03048,
-  pine: 0x243b47,
+  pine: 0x2a5549,
   pineSnow: 0xe9ecf4,
   bark: 0x4b3e45,
   stone: 0x8a8fa3,
@@ -28,8 +28,10 @@ export function makePath() {
   const pts = [
     new THREE.Vector3(-2.0, 0, 9.0),
     new THREE.Vector3(-4.8, 0, 1.2),
-    new THREE.Vector3(-0.8, 0, -8.0),
-    new THREE.Vector3(3.4, 0, -17.0),
+    new THREE.Vector3(-5.7, 0, -5.0),
+    new THREE.Vector3(-1.4, 0, -10.3),
+    new THREE.Vector3(6.3, 0, -15.7),
+    new THREE.Vector3(5.4, 0, -21.7),
     new THREE.Vector3(0.2, 0, -25.4),
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
@@ -620,7 +622,7 @@ function buildCourtyard(scene, world, heightAt) {
     return material;
   };
   const needles = mat(0x245444), frost = mat(0xc9d5e1);
-  const gold = warmGlass(0xffba58, .02);
+  const ornamentLights = [warmGlass(0xffba58, .02), warmGlass(0xf17b79, .13), warmGlass(0x7acdb2, .23)];
   const bulbGeo = new THREE.SphereGeometry(.067, 8, 6);
   // 三层枝桠贴着石柱展开，中间留出望向窗灯的通道。
   for (let tier = 0; tier < 3; tier++) {
@@ -636,12 +638,30 @@ function buildCourtyard(scene, world, heightAt) {
       const bough = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {depth:.32, bevelEnabled:false}), needles);
       bough.position.set(cx, by, cz + .12);
       g.add(bough);
-      for (const u of [.25,.55,.85]) {
-        const bulb = new THREE.Mesh(bulbGeo, gold);
+      for (const [i, u] of [.25,.55,.85].entries()) {
+        const bulb = new THREE.Mesh(bulbGeo, ornamentLights[(tier + i + (side < 0 ? 1 : 0)) % 3]);
         bulb.position.set(cx + side * (.4 + (width - .4) * u), by + y + .21 - .32 * u, cz + .49);
         g.add(bulb);
       }
     }
+  }
+  const ribbon = mat(0xd3a867);
+  for (const [x, z, size, color] of [
+    [-2.45, 1.0, .52, 0x953d58], [-2.95, .3, .39, 0x355f57], [2.55, .45, .47, 0x48658c],
+  ]) {
+    const parcel = new THREE.Group();
+    parcel.position.set(cx + x, heightAt(cx + x, cz + z), cz + z);
+    parcel.rotation.y = x * .21;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(size, size * .72, size), mat(color));
+    box.position.y = size * .36;
+    parcel.add(box);
+    for (const angle of [0, Math.PI / 2]) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(size * .21, size * .75, size * 1.015), ribbon);
+      band.position.y = size * .37;
+      band.rotation.y = angle;
+      parcel.add(band);
+    }
+    g.add(parcel);
   }
   const homes = [[-2.7,-6,.18],[.2,-8.3,-.09],[3.0,-6.6,-.19]];
   homes.forEach(([x,z,angle], i) => {

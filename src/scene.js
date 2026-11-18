@@ -97,23 +97,25 @@ scene.add(fill);
 
 const GradeShader = {
   uniforms: {
-    tDiffuse: { value: null }, uTime: { value: 0 },
-    uVignette: { value: 0.18 }, uGrain: { value: 0.028 },
+    tDiffuse: { value: null }, uGrid: { value: new THREE.Vector2() },
+    uVignette: { value: 0.17 },
     uShadow: { value: new THREE.Vector3(0.93, 0.96, 1.06) },
     uHighlight: { value: new THREE.Vector3(1.05, 1.0, 0.94) },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: [
-    'uniform sampler2D tDiffuse; uniform float uTime,uVignette,uGrain;',
+    'uniform sampler2D tDiffuse; uniform float uVignette; uniform vec2 uGrid;',
     'uniform vec3 uShadow,uHighlight; varying vec2 vUv;',
-    'float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }',
     'void main(){',
-    '  vec4 c = texture2D(tDiffuse, vUv);',
+    '  vec2 cell = floor(vUv * uGrid);',
+    '  vec4 c = texture2D(tDiffuse, (cell + 0.5) / uGrid);',
     '  float l = dot(c.rgb, vec3(0.2126,0.7152,0.0722));',
     '  c.rgb *= mix(uShadow, uHighlight, smoothstep(0.25, 0.85, l));',
     '  vec2 d = vUv - 0.5;',
-    '  c.rgb *= mix(1.0, smoothstep(0.9, 0.3, length(d)), uVignette);',
-    '  c.rgb += (hash(vUv * vec2(1920.0,1080.0) + fract(uTime) * 7.0) - 0.5) * uGrain;',
+    '  c.rgb *= mix(1.0, (1.0 - smoothstep(0.3, 0.9, length(d))), uVignette);',
+    '  vec2 tile = mod(cell, 2.0);',
+    '  float dither = (tile.x * 2.0 + tile.y * (3.0 - 4.0 * tile.x)) / 4.0;',
+    '  c.rgb = floor(clamp(c.rgb, 0.0, 1.0) * 37.0 + dither + 0.125) / 37.0;',
     '  gl_FragColor = c;',
     '}',
   ].join('\n'),
@@ -126,6 +128,11 @@ const bloomPass = new UnrealBloomPass(new THREE.Vector2(VIEW_WIDTH, VIEW_HEIGHT)
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 const gradePass = new ShaderPass(GradeShader);
+function updatePixelGrid(width, height) {
+  const pixelSize = width < 600 ? 1.8 : 2.65;
+  gradePass.uniforms.uGrid.value.set(Math.ceil(width / pixelSize), Math.ceil(height / pixelSize));
+}
+updatePixelGrid(VIEW_WIDTH, VIEW_HEIGHT);
 composer.addPass(gradePass);
 renderer.info.autoReset = false;
 
@@ -233,7 +240,6 @@ function draw() {
   const lighting = THREE.MathUtils.smoothstep(story.awakenT, .45, 3.6);
   bloomPass.strength = THREE.MathUtils.lerp(.19, .42, lighting);
   renderer.toneMappingExposure = 1.05 + 0.08 * fk;
-  gradePass.uniforms.uTime.value = storyClock;
   renderer.info.reset();
   composer.render();
   document.body.dataset.stage = story.state;
@@ -304,6 +310,7 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+  updatePixelGrid(innerWidth, innerHeight);
   if (paused) {
     window.__SCENE_READY__ = false;
     draw();
