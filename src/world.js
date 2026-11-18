@@ -608,6 +608,62 @@ function buildCourtyard(scene, world, heightAt) {
   g.add(recess);
   world.baseTop = new THREE.Vector3(cx, by + 3, cz + .028);
   world.basePos = new THREE.Vector3(cx, by, cz);
+  const festiveLights = [];
+  const warmGlass = (color, delay) => {
+    const material = mat(0x826955, { emissive: color, emissiveIntensity: .04 });
+    festiveLights.push({material, delay});
+    return material;
+  };
+  const needles = mat(0x245444), frost = mat(0xc9d5e1);
+  const gold = warmGlass(0xffba58, .02);
+  const bulbGeo = new THREE.SphereGeometry(.067, 8, 6);
+  // 三层枝桠贴着石柱展开，中间留出望向窗灯的通道。
+  for (let tier = 0; tier < 3; tier++) {
+    const width = 1.94 - tier * .44, y = 1.48 + tier * .65;
+    for (const side of [-1, 1]) {
+      const shape = new THREE.Shape();
+      shape.moveTo(side * .38, y + .9);
+      shape.lineTo(side * width, y - .18);
+      shape.lineTo(side * (width - .25), y - .08);
+      shape.lineTo(side * (width - .35), y - .21);
+      shape.lineTo(side * .39, y + .18);
+      shape.closePath();
+      const bough = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {depth:.32, bevelEnabled:false}), needles);
+      bough.position.set(cx, by, cz + .12);
+      g.add(bough);
+      for (const u of [.25,.55,.85]) {
+        const bulb = new THREE.Mesh(bulbGeo, gold);
+        bulb.position.set(cx + side * (.4 + (width - .4) * u), by + y + .21 - .32 * u, cz + .49);
+        g.add(bulb);
+      }
+    }
+  }
+  const homes = [[-2.7,-6,.18],[.2,-8.3,-.09],[3.0,-6.6,-.19]];
+  homes.forEach(([x,z,angle], i) => {
+    const home = new THREE.Group();
+    home.position.set(cx + x, heightAt(cx + x, cz + z), cz + z);
+    home.rotation.y = angle;
+    const wood = mat([0x81474e,0x90664e,0x556d61][i]);
+    const windows = warmGlass([0xffae53,0xffcf88,0xffae73][i], .25 + i * .19);
+    const panel = (w,h,d,x,y,z,m) => {
+      const part = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+      part.position.set(x,y,z);
+      home.add(part);
+      return part;
+    };
+    panel(2.25,1.65,1.78,0,.825,0,wood);
+    panel(.45,1.15,.07,0,.575,.91,mat(0x503737));
+    for (const s of [-1,1]) {
+      panel(1.55,.18,2.16,s*.62,1.90,0,frost).rotation.z = -s * .49;
+      panel(.56,.65,.06,s*.65,.84,.91,windows);
+      panel(.055,.66,.04,s*.65,.84,.96,wood);
+    }
+    g.add(home);
+  });
+  world.setChristmasLights = progress => {
+    for (const { material, delay } of festiveLights)
+      material.emissiveIntensity = .04 + 3.2 * THREE.MathUtils.smoothstep(progress, delay, delay + .23);
+  };
   world.stepHeight = ({ x, z }) => {
     if (Math.abs(x - cx) > 1.35 || z < cz + .4 || z > cz + 2.38) return 0;
     return .72 * THREE.MathUtils.clamp((cz + 2.38 - z) / 1.3, 0, 1);

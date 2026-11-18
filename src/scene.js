@@ -94,7 +94,7 @@ const world = buildWorld(scene, rand);
 const { config, source } = loadConfig();
 const hands = buildMittens();
 const fox = buildFox();
-fox.group.scale.setScalar(1.3); // 夜里雪地上要读得出同伴
+fox.group.scale.setScalar(.94); // 夜里雪地上要读得出同伴
 const star = buildStar(config);
 scene.add(hands, fox.group, star);
 

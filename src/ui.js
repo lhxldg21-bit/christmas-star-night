@@ -61,7 +61,7 @@ export class UI {
     const row = this._el('div', 'inspect-actions', this.inspectPanel);
     const flip = this._el('button', 'btn-ghost', row, '翻面看看');
     flip.addEventListener('click', () => this.onIntent({ type: 'flip' }));
-    const go = this._el('button', 'btn-primary small', row, '继续走');
+    const go = this._el('button', 'btn-primary small', row, '晃一晃星光');
     go.addEventListener('click', () => this.onIntent({ type: 'continue' }));
     this._el('div', 'inspect-hint', this.inspectPanel, '拖动可以转动星星');
   }

@@ -76,6 +76,7 @@ export class Story {
     this.look = { yaw: 0, pitch: 0 };
     this.route = [];
     this.world.starPatch.visible = false;
+    this.world.setChristmasLights(0);
     this.reducedMotion = !this.auto && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.starState = 'ground';
     this.prints.clear();
@@ -218,7 +219,7 @@ export class Story {
         if (this.state === 'walk' && this.starState === 'carried') this._followRoute(it.progress);
         break;
       case 'pickup':
-        if (this.state === 'walk' && this.starState === 'ground' &&
+        if (this.state === 'walk' && !this.p.target && this.f.offered && this.starState === 'ground' &&
             this.p.pos.distanceTo(this.starGroundPos) < 2.2) {
           this.state = 'pickup';
           this.starState = 'pickup';
@@ -239,10 +240,11 @@ export class Story {
           this.starState = 'carried';
           this.f.mode = 'chase';
           this.f.gagT = 0;
+          this.jumpFrom = this.f.pos.clone();
           this.lightOrigin = this.world.starPatch.position.clone();
           const forward = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw));
           const side = new THREE.Vector3(-forward.z, 0, forward.x);
-          this.lightEnd = this.p.pos.clone().addScaledVector(forward, 2.65).addScaledVector(side, 1.03);
+          this.lightEnd = this.p.pos.clone().addScaledVector(forward, 3.55).addScaledVector(side, .82);
           this.audio.setLayer(1);
         }
         break;
@@ -317,7 +319,8 @@ export class Story {
 
     if (f.mode === 'guard') {
       f.sitting = Math.min(1, f.sitting + dt * 4);
-      const near = this.starState === 'ground' && this.p.pos.distanceTo(this.starGroundPos) < 3.4;
+      const near = this.state === 'walk' && !this.p.target && this.starState === 'ground' &&
+        this.p.pos.distanceTo(this.starGroundPos) < 2.2;
       if (near && !f.offered) {
         f.mode = 'offer';
         f.offerT = 0;
@@ -332,18 +335,18 @@ export class Story {
       f.sitting = Math.max(0, f.sitting - dt * 5);
       f.moving = 0;
       const towardStar = Math.atan2(this.starGroundPos.x - f.pos.x, this.starGroundPos.z - f.pos.z);
-      f.yaw = dampAngle(f.yaw, f.offerT < 1.8 ? towardStar : Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
+      f.yaw = dampAngle(f.yaw, f.offerT < .75 ? towardStar : Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
       if (f.offerT > 1.1 || this.starState !== 'ground') {
         f.mode = 'guard';
         f.offered = true;
       }
     } else if (f.mode === 'lead') {
-      const pr = Math.min(this._progress(this.p.pos) + 0.050, 0.95);
+      const pr = Math.min(this._progress(this.p.pos) + 0.106, 0.98);
       target = path.curve.getPointAt(pr);
       const tangent = path.curve.getTangentAt(pr);
-      target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.52));
+      target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.83));
       if (this._progress(this.p.pos) > .89) f.mode = 'arrive';
-      speed = 1.65;
+      speed = 2.1;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       const distToPlayer = f.pos.distanceTo(this.p.pos);
       // Stay visible as a guide. If the player pauses, wait ahead instead of
@@ -362,10 +365,14 @@ export class Story {
       const sweep = THREE.MathUtils.smoothstep(f.gagT, .3, 1.4);
       const patch = this.world.starPatch;
       patch.position.copy(this.lightOrigin).lerp(this.lightEnd, sweep);
-      if (f.gagT > .42) { target = patch.position; speed = 3.4; }
-      if (f.gagT > 1.45 && Math.hypot(f.pos.x - patch.position.x, f.pos.z - patch.position.z) < .28) {
+      const jump = THREE.MathUtils.smoothstep(f.gagT, .78, 1.72);
+      f.pos.lerpVectors(this.jumpFrom, this.lightEnd, jump);
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.lightEnd.x - this.jumpFrom.x, this.lightEnd.z - this.jumpFrom.z), 5, dt);
+      if (f.gagT >= 1.72) {
         f.mode = 'peek';
         f.gagT = 0;
+        this.paws.spawn(f.pos.x, f.pos.z, f.yaw);
+        this.audio.footstep('fox', f.pos.distanceTo(this.p.pos));
       }
     } else if (f.mode === 'peek') {
       f.gagT += dt;
@@ -373,15 +380,16 @@ export class Story {
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
       if (f.gagT >= 1.45) f.mode = 'comeback';
     } else if (f.mode === 'comeback') {
-      const side = new THREE.Vector3(-Math.cos(this.p.yaw), 0, Math.sin(this.p.yaw)).multiplyScalar(1.05);
-      const ahead = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw)).multiplyScalar(.3);
-      target = this.p.pos.clone().add(side).add(ahead);
+      const t = Math.min(.98, this._progress(this.p.pos) + .106);
+      target = path.curve.getPointAt(t);
+      const tangent = path.curve.getTangentAt(t);
+      target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .83);
       speed = RUN * .9;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       if (f.pos.distanceTo(target) < .32) {
         f.mode = 'lead';
         this.state = 'walk';
-        this.toastUntil = this.time + 3.8;
+        this.toastUntil = this.time + 1.8;
       }
     } else if (f.mode === 'arrive') {
       const b = this.world.basePos;
@@ -436,11 +444,11 @@ export class Story {
       head.position.y -= dip * .11;
       head.rotation.z -= dip * .25;
     } else if (f.mode === 'chase') {
-      const spring = Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, .57, 1.35));
+      const spring = Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, .78, 1.72));
       g.position.y += spring * .26;
       head.rotation.z -= .15 * (1 - spring);
     } else if (f.mode === 'peek') {
-      g.position.y -= .12 * (1 - THREE.MathUtils.smoothstep(f.gagT, .5, 1.4));
+      g.position.y -= .09 * Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, 0, .66));
       this.fox.parts.tailPivot.rotation.y = Math.sin(f.gagT * 12) * .28;
     }
     for (const puff of this.fox.parts.snowPuffs) {
@@ -512,6 +520,7 @@ export class Story {
     }
     if(this.state==='awakening') {
       this.awakenT+=dt;
+      this.world.setChristmasLights(this.awakenT / 3.1);
       const k=THREE.MathUtils.smoothstep(this.awakenT,.5,3.2);
       this.star.userData.star.material.emissiveIntensity=.68+k*.76;
       this.star.userData.light.intensity=.4+k*3.35;
@@ -589,19 +598,28 @@ export class Story {
     if (this.state === 'pickup') eye.y -= .28 * Math.sin(Math.PI * this.pickupT / 2.4);
     const goalPos = eye.clone();
     let goalLook;
-    const pr = this._progress(p);
+    const nearest = Math.round(this._progress(p) * 120);
+    const samples = this.world.path.samples;
+    const i = Math.max(0, nearest - 1), j = Math.min(120, nearest + 1);
+    const segment = samples[j].clone().sub(samples[i]);
+    const along = THREE.MathUtils.clamp(p.clone().sub(samples[i]).dot(segment) / segment.lengthSq(), 0, 1);
+    const pr = (i + along * (j - i)) / 120;
     if (['approach-base', 'placing', 'awakening', 'finale', 'letter'].includes(this.state)) {
       goalLook = this.world.baseTop.clone().add(new THREE.Vector3(0, -.32, 0));
       if (this.state === 'placing') goalLook.lerp(this.star.position, .50);
+      if (['awakening', 'finale', 'letter'].includes(this.state)) {
+        const reveal = THREE.MathUtils.smoothstep(this.awakenT, .65, 2.8);
+        goalLook.lerp(this.world.basePos.clone().add(new THREE.Vector3(0, 1.43, -7)), reveal);
+      }
     } else if (['pickup', 'inspect', 'gag'].includes(this.state)) {
       goalLook = this.f.pos.clone().add(new THREE.Vector3(0, .53, 0));
       if (this.world.starPatch.visible) goalLook.lerp(this.world.starPatch.position, this.state === 'inspect' ? .12 : .39);
     } else if (this.starState === 'ground') {
       goalLook = this.starGroundPos.clone().lerp(this.f.pos, .36).add(new THREE.Vector3(0, .20, 0));
     } else {
-      goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .08))
-        .lerp(this.f.pos, .38).add(new THREE.Vector3(0, .88, 0));
-      if (pr > .9) goalLook.lerp(this.world.baseTop, .60);
+      goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .145))
+        .lerp(this.f.pos, .09).add(new THREE.Vector3(0, .88, 0));
+      goalLook.lerp(this.world.baseTop, .82 * THREE.MathUtils.smoothstep(pr, .83, 1));
     }
     if (this.state === 'cover' || this.state === 'intro') {
       const wide = this.world.path.samples[0].clone().add(new THREE.Vector3(1, 3.5, 3.9));
@@ -617,7 +635,7 @@ export class Story {
     }
     const k = this.camInit && dt && !this.reducedMotion ? 1 - Math.exp(-7 * dt) : 1;
     this.camPos.lerp(goalPos, k);
-    this.camLook.lerp(goalLook, k);
+    this.camLook.lerp(goalLook, this.camInit && dt && !this.reducedMotion && this.state === 'walk' ? 1 - Math.exp(-3.6 * dt) : k);
     this.camInit = true;
     camera.position.copy(this.camPos);
     camera.lookAt(this.camLook);
@@ -638,12 +656,12 @@ export class Story {
     const nearBase = this.starState === 'carried' && this.p.pos.distanceTo(this.world.basePos) < 3.7;
     if (!this.ui) return;
     this.ui.setPrompt(
-      this.state === 'walk' && nearStar ? '拾起星星' :
-      this.state === 'walk' && nearBase ? '安放星星' : null,
+      this.state === 'walk' && !this.p.target && this.f.offered && nearStar ? '拾起星星' :
+      this.state === 'walk' && !this.p.target && nearBase ? '安放星星' : null,
     );
     this.ui.setInspect(this.state === 'inspect', this.config, Math.abs(Math.sin(this.inspect.yaw/2))>.7);
     this.ui.setJourney(
-      this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil,
+      this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > .25,
       this.starState === 'ground' ? '跟着暖光走' : '跟上小狐狸',
     );
     this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
@@ -662,7 +680,7 @@ function buildAutoScript() {
   const route=(t,progress)=>({t,intent:{type:'route',progress}});
   return [
     {t:.4,intent:{type:'start'}},{t:2.1,intent:{type:'advance'}},
-    {t:4.4,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
+    {t:5.15,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
     {t:12,intent:{type:'continue'}}, route(17,.20),
     route(23,.43),route(32,.60),route(40,.75),route(46,.88),route(51,1),
     {t:56,intent:{type:'place'}},

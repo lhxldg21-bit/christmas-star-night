@@ -150,8 +150,8 @@ export function buildMittens() {
 
 export function buildFox() {
   const g = new THREE.Group();
-  const rust = mat(PALETTE.foxRust);
-  const cream = mat(PALETTE.cream);
+  const rust = mat(0xe28c4e, {flatShading:false, emissive:0x673616, emissiveIntensity:.12});
+  const cream = mat(0xffebce, {flatShading:false});
   const dark = mat(0x5a3a28);
 
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), rust);
@@ -173,14 +173,15 @@ export function buildFox() {
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.167, 12, 8), rust);
-  head.scale.set(1.04, .91, 1.06);
+  head.scale.set(1.02, .99, 1.17);
+  headPivot.scale.setScalar(1.15);
   head.castShadow = true;
-  const snout = new THREE.Mesh(new THREE.CylinderGeometry(.025, .127, .185, 7), cream);
-  snout.scale.set(.82, 1, 1);
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(.097, 14, 10), cream);
+  snout.scale.set(.62, 1.04, 1.32);
   snout.rotation.z=-Math.PI/2;
   snout.position.set(0.135, -0.044, 0);
   const nose = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), mat(0x2d2430));
-  nose.position.set(0.21, -0.02, 0);
+  nose.position.set(.225, -.023, 0);
   const earL = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.18, 4), rust);
   const earR = earL.clone();
   earL.position.set(-0.03, 0.16, -0.085);
@@ -189,10 +190,10 @@ export function buildFox() {
     const lining = new THREE.Mesh(new THREE.ConeGeometry(.046, .127, 3), mat(0xe4a098));
     lining.position.set(.013, .176, side * .081);
     headPivot.add(lining);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(.019,8,6),mat(0x202b36));
-    eye.position.set(.102,.038,side*.134); headPivot.add(eye);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(.025,12,8),mat(0x202b36));
+    eye.scale.set(.90,1.10,.83); eye.position.set(.128,.035,side*.117); headPivot.add(eye);
     const shine = new THREE.Mesh(new THREE.SphereGeometry(.006,6,4),mat(0xffffff));
-    shine.position.set(.110,.045,side*.149);headPivot.add(shine);
+    shine.position.set(.145,.046,side*.127);headPivot.add(shine);
   }
   headPivot.add(head, snout, nose, earL, earR);
 
@@ -244,7 +245,7 @@ export function buildFox() {
       headPivot.position.y = 0.42 - sitting * 0.04 + Math.sin(t * 1.8) * 0.006;
       headPivot.rotation.z = sitting * 0.15;
       headPivot.rotation.y = 0;
-      tailPivot.rotation.z = 0.5 + sitting * 0.5;
+      tailPivot.rotation.z = -.18 - sitting * .25;
       tailPivot.rotation.y = Math.sin(t * (moving > 0.1 ? 6 : 2.2)) * (moving > 0.1 ? 0.25 : 0.12);
     },
   };
