@@ -120,13 +120,23 @@ canvas{display:block;position:fixed;inset:0}
 .btn-primary,.btn-primary.small,.prompt{background:#e6cca0;border:1px solid #f3dfb8;border-radius:4px;box-shadow:0 4px 18px #13213022;font-size:14px;letter-spacing:.13em;padding:12px 24px;animation:none}
 .btn-ghost{border-radius:4px;padding:11px 22px;font-size:14px;background:#24394c80}
 .inspect-hint{color:#d6dfe5;font-size:11px}.toast{top:auto;bottom:9vh;background:#172d40c7;border-radius:4px;font-size:14px}
-.journey-hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;letter-spacing:.14em;color:#f3eee6;text-shadow:0 1px 6px #102030;background:#1d35486b;padding:9px 16px;border-radius:4px;pointer-events:none!important}
+.journey-hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;letter-spacing:.14em;color:#f3eee6;text-shadow:0 1px 6px #102030;background:#1d35486b;padding:9px 16px;border-radius:4px;border:1px solid #dcc6a285;min-height:44px;cursor:pointer}
+.journey-hint:focus-visible,.prompt:focus-visible,.inspect-actions button:focus-visible{outline:2px solid #ffe2a7;outline-offset:4px}
 .letter{background:#12213340;backdrop-filter:none;align-items:flex-end;padding-bottom:42px}
 .letter-paper{border-radius:3px;max-height:52vh;box-shadow:0 16px 40px #07152266;border-top:2px solid #b9a17b;background:#f8efe2}
 .letter-body{font-size:15px;line-height:2}.letter-to{font-size:17px}
-@media(max-width:500px){.note-card{padding:16px 20px}.note-text{font-size:14px}.inspect{padding:14px 20px 22px}.note-kicker{margin-bottom:8px}.note-sign{margin-top:5px}.letter-paper{padding:22px;max-height:55vh}.sound-bar{font-size:11px}.journey-hint{font-size:11px;bottom:22px}}
+@media(max-width:500px){.note-card{padding:16px 20px}.note-text{font-size:14px}.inspect{padding:14px 20px 22px}.note-kicker{margin-bottom:8px}.note-sign{margin-top:5px}.letter-paper{padding:17px 20px;max-height:55vh}.letter-body{font-size:14px;line-height:1.72}.sound-bar{font-size:11px}.journey-hint{font-size:11px;bottom:22px}}
+@media(prefers-reduced-motion:reduce){.cover,.cover-box,.btn-primary{animation:none;transition:none}}
+.name-kicker{position:absolute;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);color:#ffd9a0;font-size:15px;letter-spacing:.18em;text-shadow:0 2px 14px #000a;animation:rise .5s ease both;pointer-events:none}
+.name-kicker b{color:#fff;font-weight:600}
+.reply{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,14,36,.5);backdrop-filter:blur(3px);animation:fadein .8s ease both;padding:20px}
+.reply-box{text-align:center;color:var(--snow);max-width:30rem;background:rgba(17,31,44,.72);border:1px solid #dcc6a255;border-radius:6px;padding:34px 30px}
+.reply-q{font-size:1.35rem;letter-spacing:.12em;line-height:1.7;color:var(--amber-soft);margin-bottom:12px}
+.reply-sub{font-size:.95rem;line-height:1.9;color:#c3cbe8;margin:0 0 20px}
+.reply-row{display:flex;gap:16px;justify-content:center;align-items:center;flex-wrap:wrap}
+.reply-again{color:var(--amber-soft);text-decoration:none;border-bottom:1px dashed rgba(255,217,160,.5);font-size:.95rem}
 </style>
-  <script type="module" crossorigin src="./assets/index-Ca7XdFOv.js"></script>
+  <script type="module" crossorigin src="./assets/index-Bn1-0SvS.js"></script>
 </head>
 <body>
 <div id="hud"></div>
