@@ -82,6 +82,13 @@ export class Story {
     this.lanternT = -1;
     this.playedInSnow = false;
     this.bendReunion = false;
+    this.guideInView = false;
+    this.guideAim = new THREE.Vector3();
+    this.gateStop = w.path.samples.at(-1).clone();
+    this.gateStop.y = w.heightAt(this.gateStop.x, this.gateStop.z);
+    this.firstBend = w.path.curve.getPointAt(.237);
+    const bend = w.path.curve.getTangentAt(.237);
+    this.firstBend.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), .84);
     this.reducedMotion = !this.auto && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.starState = 'ground';
     this.prints.clear();
@@ -211,7 +218,7 @@ export class Story {
     }
     this._updatePlayer(dt);
     if (!this.playedInSnow && this.state === 'walk' && this.starState === 'carried' &&
-        this._progress(this.p.pos) >= .165) {
+        this._progress(this.p.pos) >= .183) {
       this.playedInSnow = true;
       this.state = 'gag';
       this.f.mode = 'chase';
@@ -238,8 +245,7 @@ export class Story {
             this.p.target = this.starGroundPos.clone().add(new THREE.Vector3(.20, 0, 1.28));
         } else if (this.starState === 'carried') {
           const progress = this._progress(this.p.pos);
-          if (progress >= .99) this.p.target = this.world.basePos.clone().add(new THREE.Vector3(0, 0, 2.35));
-          else this._followRoute(Math.min(1, progress + .18));
+          if (!this._atGate()) this._followRoute(Math.min(1, progress + .18));
         }
         break;
       }
@@ -267,7 +273,7 @@ export class Story {
         if (this.state === 'inspect') {
           this.state = 'walk';
           this.starState = 'carried';
-          this.f.mode = 'lead';
+          this.f.mode = 'scoutFirstBend';
           this.audio.setLayer(1);
         }
         break;
@@ -309,10 +315,10 @@ export class Story {
 
   _atGate() {
     return this.state === 'walk' && !this.p.target && this.starState === 'carried' &&
-      this.p.pos.distanceTo(this.world.basePos) < 3.7;
+      this.p.pos.distanceTo(this.gateStop) < .24;
   }
 
-  canLightLantern() { return this._atGate() && this.lanternT < 0; }
+  canLightLantern() { return this._atGate() && this.lanternT < 0 && this.f.mode === 'arrive-sit'; }
 
   canPlace() { return this._atGate() && this.lanternT >= 1.4; }
 
@@ -408,17 +414,28 @@ export class Story {
         f.mode = 'guard';
         f.offered = true;
       }
+    } else if (f.mode === 'scoutFirstBend') {
+      target = this.firstBend;
+      speed = 3.3;
+      f.sitting = Math.max(0, f.sitting - dt * 7);
+      if (f.pos.distanceTo(target) < .22) {
+        f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
+        target = null;
+      }
     } else if (f.mode === 'lead') {
       const playerProgress = this._progress(this.p.pos);
       // Wait at the bend long enough for the player to catch up.
-      const leadLimit = playerProgress < .48 ? .52 : .98;
-      const pr = Math.min(playerProgress + .106, leadLimit);
+      const leadLimit = !this.bendReunion && playerProgress < .52 ? .53 : .98;
+      const pr = Math.min(playerProgress + .083, leadLimit);
       target = path.curve.getPointAt(pr);
       const tangent = path.curve.getTangentAt(pr);
       target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.83));
-      if (playerProgress > .89) f.mode = 'arrive';
+      if (playerProgress > .85) {
+        f.mode = 'arrive';
+        target = this.world.lanternFox;
+      }
       if (!this.bendReunion && playerProgress > .38 && playerProgress < .55 &&
-          f.pos.distanceTo(target) < .72) {
+          f.pos.distanceTo(target) < .58) {
         f.mode = 'waitAtBend';
         f.companionT = 0;
         this.audio.chime();
@@ -428,7 +445,7 @@ export class Story {
       const distToPlayer = f.pos.distanceTo(this.p.pos);
       // Stay visible as a guide. If the player pauses, wait ahead instead of
       // sprinting all the way back and making the scene feel stalled.
-      if (f.mode === 'lead' && this.p.idleTime > .75 && distToPlayer > 1.55) {
+      if (f.mode === 'lead' && this.p.idleTime > .55 && distToPlayer > 2.6 && f.pos.distanceTo(target) < .52) {
         f.mode = 'waitAhead';
       }
     } else if (f.mode === 'waitAhead') {
@@ -471,7 +488,7 @@ export class Story {
       }
     } else if (f.mode === 'comeback') {
       f.recoveryT += dt;
-      const t = Math.min(.98, this._progress(this.p.pos) + .106);
+      const t = Math.min(.98, this._progress(this.p.pos) + .083);
       target = path.curve.getPointAt(t);
       const tangent = path.curve.getTangentAt(t);
       target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .83);
@@ -603,7 +620,7 @@ export class Story {
     if (lantern && this.camInit) {
       const side = new THREE.Vector3(-this.carryForward.z, 0, this.carryForward.x).normalize();
       this.inspect.anchor.copy(this.camPos).addScaledVector(this.carryForward, 1.04)
-        .addScaledVector(side, -.32 + .17 * charge);
+        .addScaledVector(side, -.23 + .13 * charge);
       this.inspect.anchor.y -= .36 - .21 * charge;
     } else {
       this.inspect.anchor.copy(this.p.pos).addScaledVector(view, .96)
@@ -621,7 +638,7 @@ export class Story {
       patch.position.lerp(destination, 1 - Math.exp(-5 * dt));
       const bankDistance = Math.hypot(patch.position.x - this.world.playSnow.x, patch.position.z - this.world.playSnow.z);
       patch.position.y = this.world.heightAt(patch.position.x, patch.position.z) + .06 +
-        .1 * (1 - THREE.MathUtils.smoothstep(bankDistance, .12, 1.1));
+        .035 * (1 - THREE.MathUtils.smoothstep(bankDistance, .12, 1.1));
       patch.material.opacity = .24 + charge * .19;
     }
     s.userData.halo.material.opacity = this.starState === 'placed' ? .65 : (lantern ? .2 + charge * .46 : .12);
@@ -765,16 +782,19 @@ export class Story {
         .lerp(this.f.pos, .09).add(new THREE.Vector3(0, .88, 0));
       goalLook.lerp(this.world.baseTop, .82 * THREE.MathUtils.smoothstep(pr, .83, 1));
       if (this._atGate()) {
-        const reveal = THREE.MathUtils.smoothstep(this.lanternT, .58, 1.7);
         const lamp = this.world.courtyardLantern.position;
-        goalLook.lerp(lamp.clone().lerp(this.world.baseTop, reveal), .48);
+        const reveal = THREE.MathUtils.smoothstep(this.lanternT, .85, 1.7);
+        goalLook.copy(lamp).lerp(this.world.lanternFox, .20);
+        goalLook.y = 1.16 + this.gateStop.y;
+        goalLook.lerp(this.world.baseTop, .88 * reveal);
+      } else if (this.state === 'walk' && ['scoutFirstBend', 'waitAhead', 'waitAtBend', 'returnAtBend'].includes(this.f.mode)) {
+        const focus = this.f.pos.clone().add(new THREE.Vector3(0, .4, 0));
+        const distance = this.f.pos.distanceTo(p);
+        goalLook.lerp(focus, .42 * THREE.MathUtils.smoothstep(distance, 1.2, 3.2));
       }
       if (this.state === 'gag') {
-        const landing = this.world.starPatch.position;
-        const patchWeight = this.f.mode === 'chase'
-          ? THREE.MathUtils.smoothstep(this.f.gagT, .18, 1.3) * .33
-          : (this.f.mode === 'peek' ? .33 * (1 - THREE.MathUtils.smoothstep(this.f.gagT, .2, 1.5)) : 0);
-        const playLook = this.f.pos.clone().add(new THREE.Vector3(0, .53, 0)).lerp(landing, patchWeight);
+        const playLook = this.f.pos.clone().lerp(this.world.playSnow, .40);
+        playLook.y = this.world.heightAt(playLook.x, playLook.z) + .47;
         const returnLook = this.f.mode === 'comeback'
           ? THREE.MathUtils.smoothstep(this.f.recoveryT, .1, 1.15) : 0;
         goalLook.lerp(playLook, 1 - returnLook);
@@ -801,6 +821,10 @@ export class Story {
     camera.rotateY(this.look.yaw);
     camera.rotateX(this.look.pitch);
     camera.getWorldDirection(this.carryForward);
+    this.guideAim.copy(this.f.pos).y += .42;
+    this.guideAim.project(camera);
+    this.guideInView = this.guideAim.z < 1 && this.guideAim.z > -1 &&
+      Math.abs(this.guideAim.x) < .76 && Math.abs(this.guideAim.y) < .8;
     this.hands.visible = ['pickup', 'inspect', 'placing'].includes(this.state) ||
       this.starState === 'carried';
     if (this.hands.visible) {
@@ -821,9 +845,14 @@ export class Story {
     );
     const flipped = this.flippedOnce && Math.abs(Math.sin(this.inspect.yaw / 2)) > .7;
     this.ui.setInspect(this.state === 'inspect', this.config, flipped, this.flippedOnce);
+    const foxAhead = this._progress(this.f.pos) - this._progress(this.p.pos) > .034;
+    const journeyLabel = this.starState === 'ground' ? '走近星星'
+      : this.f.mode === 'scoutFirstBend' ? '沿雪路走到拐角'
+      : this.guideInView && foxAhead ? '跟上小狐狸'
+      : this.f.mode === 'returnAtBend' ? '一起往前走' : '沿雪路向前';
     this.ui.setJourney(
       this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > .25,
-      this.starState === 'ground' ? '跟着暖光走' : '跟上小狐狸',
+      journeyLabel,
     );
     this.ui.setNameKicker(this.nameKickerT >= 0 && this.nameKickerT < 2.2 ? this.config.toName : null);
     this.ui.setWishCharge(this.wishing, this.wishGlow);

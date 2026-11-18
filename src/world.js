@@ -31,8 +31,8 @@ export function makePath() {
     new THREE.Vector3(-5.7, 0, -5.0),
     new THREE.Vector3(-1.4, 0, -10.3),
     new THREE.Vector3(6.3, 0, -15.7),
-    new THREE.Vector3(5.4, 0, -21.7),
-    new THREE.Vector3(0.2, 0, -25.4),
+    new THREE.Vector3(4.9, 0, -20.5),
+    new THREE.Vector3(0.2, 0, -22.8),
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
   const samples = curve.getSpacedPoints(120);
@@ -41,7 +41,7 @@ export function makePath() {
 }
 
 // 地形高度：平缓起伏，路径走廊压平。纯函数，构建期调用。
-function makeHeightField(path) {
+function makeHeightField(path, playSnow) {
   const hills = [
     { x: -9, z: 2, r: 7, h: 0.9 },
     { x: 8, z: -3, r: 8, h: 1.1 },
@@ -68,7 +68,8 @@ function makeHeightField(path) {
     h += 0.08 * Math.sin(x * 0.7) * Math.cos(z * 0.55);
     const dp = distToPath(x, z);
     const flat = THREE.MathUtils.smoothstep(dp, 0.9, 3.2); // 路径 1.8m 内全平
-    return h * flat;
+    const bank = Math.max(0, 1 - ((x - playSnow.x) / 1.1) ** 2 - ((z - playSnow.z) / 1.5) ** 2);
+    return h * flat + .13 * bank * bank;
   };
 }
 
@@ -76,7 +77,11 @@ export function buildWorld(scene, rand) {
   const world = { lamps: [], glowDecals: [] };
   const path = makePath();
   world.path = path;
-  const heightAt = makeHeightField(path);
+  const playSnow = path.curve.getPointAt(.249);
+  const bend = path.curve.getTangentAt(.249);
+  playSnow.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.40);
+  const heightAt = makeHeightField(path, playSnow);
+  world.playSnow = playSnow;
   world.heightAt = heightAt;
 
   // —— 地面：半径足够大，任何合法机位看不到边缘 ——
@@ -141,15 +146,13 @@ export function buildWorld(scene, rand) {
   }));
   world.starPatch.visible = false;
   scene.add(world.starPatch);
-  const entrance = path.curve.getPointAt(.065);
-  entrance.x -= .33;
-  entrance.z -= 1.06;
+  const entrance = path.curve.getPointAt(.072);
+  const entranceTangent = path.curve.getTangentAt(.072);
+  entrance.addScaledVector(new THREE.Vector3(-entranceTangent.z, 0, entranceTangent.x), -1.76);
   entrance.y = heightAt(entrance.x, entrance.z);
-  makeLowLantern(scene, entrance).setGlow(.65);
+  makeLowLantern(scene, entrance, .73).setGlow(.42);
   buildSky(scene, world, rand);
   buildPines(scene, world, rand, heightAt, path);
-  buildSnowDrifts(scene, rand, heightAt, path);
-  buildPathDetails(scene, world, rand, heightAt, path);
   buildLamps(scene, world, path, heightAt);
   buildCourtyard(scene, world, heightAt);
   world.ridgeMaterials = buildDistantHills(scene, rand);
@@ -293,7 +296,7 @@ function buildPines(scene, world, rand, heightAt, path) {
       if (dd < dp) dp = dd;
     }
     if (Math.sqrt(dp) < (z > 0 ? 5.0 : 3.4)) continue; // 让开路径
-    if (Math.abs(x) < 5 && z < -9 && z > -22) continue; // 让开小院
+    if (Math.abs(x) < 5 && z < -9 && z > -32) continue; // 让开小院
     placements.push({ x, z, s: 0.8 + rand() * 1.6, rot: rand() * Math.PI * 2 });
   }
   const trunkMat = mat(PALETTE.bark);
@@ -342,173 +345,6 @@ function mergeGeos(geos) {
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
   return out;
-}
-
-// —— 雪堆与石头：半埋的压扁球，制造地形厚度与使用痕迹 ——
-function buildSnowDrifts(scene, rand, heightAt, path) {
-  const driftGeo = new THREE.SphereGeometry(1, 8, 6);
-  const driftMat = mat(PALETTE.snow, { flatShading: false });
-  const rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
-  const rockMat = mat(PALETTE.stone);
-  const drifts = new THREE.InstancedMesh(driftGeo, driftMat, 26);
-  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, 10);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-  let di = 0, ri = 0;
-  for (let i = 0; i < 60 && (di < 26 || ri < 10); i++) {
-    const a = rand() * Math.PI * 2, r = 3 + rand() * 24;
-    const x = Math.cos(a) * r, z = Math.sin(a) * r - 3;
-    let dp = Infinity;
-    for (const p of path.samples) {
-      const dd = (p.x - x) ** 2 + (p.z - z) ** 2;
-      if (dd < dp) dp = dd;
-    }
-    if (Math.sqrt(dp) < 2.2 || (z > 2 && Math.abs(x + 3) < 6)) continue;
-    const y = heightAt(x, z);
-    q.setFromAxisAngle(up, rand() * Math.PI * 2);
-    if (di < 26 && rand() < 0.75) {
-      const s = 0.5 + rand() * 1.3;
-      m.compose(new THREE.Vector3(x, y - s * 0.55, z), q, new THREE.Vector3(s, s * 0.5, s));
-      drifts.setMatrixAt(di++, m);
-    } else if (ri < 10) {
-      const s = 0.3 + rand() * 0.5;
-      m.compose(new THREE.Vector3(x, y + s * 0.25, z), q, new THREE.Vector3(s, s * 0.8, s));
-      rocks.setMatrixAt(ri++, m);
-    }
-  }
-  drifts.count = di; rocks.count = ri;
-  drifts.receiveShadow = rocks.castShadow = true;
-  scene.add(drifts, rocks);
-}
-
-// —— 路径细节：近景折枝、雪堤和半埋木段，给镜头前后景与转弯提供支点 ——
-function buildPathDetails(scene, world, rand, heightAt, path) {
-  const detail = new THREE.Group();
-  const snowMat = mat(PALETTE.pineSnow);
-  const barkMat = mat(0x6d594d);
-
-  const branchAt = (t, side, scale) => {
-    const p = path.curve.getPointAt(t);
-    const tangent = path.curve.getTangentAt(t).normalize();
-    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
-    const root = p.clone().addScaledVector(normal, side * 3.05);
-    root.y = heightAt(root.x, root.z);
-    const curve = new THREE.CatmullRomCurve3([
-      root.clone(),
-      root.clone().addScaledVector(normal, -side * .65).add(new THREE.Vector3(0, 1.15, 0)),
-      root.clone().addScaledVector(normal, -side * 1.35).add(new THREE.Vector3(0, 2.15, 0)),
-      root.clone().addScaledVector(tangent, .55).addScaledVector(normal, -side * 1.15).add(new THREE.Vector3(0, 2.85, 0)),
-    ]);
-    const branch = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 18, .055 * scale, 5, false),
-      barkMat,
-    );
-    branch.castShadow = true;
-    detail.add(branch);
-
-    const snowCurve = new THREE.CatmullRomCurve3(
-      curve.points.map((v) => v.clone().add(new THREE.Vector3(0, .055 * scale, 0))),
-    );
-    const snow = new THREE.Mesh(
-      new THREE.TubeGeometry(snowCurve, 18, .032 * scale, 5, false),
-      snowMat,
-    );
-    detail.add(snow);
-
-    for (let i = 1; i <= 3; i++) {
-      const q = curve.getPointAt(i / 4.3);
-      const twig = new THREE.Mesh(
-        new THREE.CylinderGeometry(.014 * scale, .026 * scale, .68 * scale, 5),
-        barkMat,
-      );
-      twig.position.copy(q);
-      twig.position.y += .22 * scale;
-      twig.rotation.z = side * (.65 + i * .1);
-      twig.rotation.x = (i - 2) * .28;
-      detail.add(twig);
-    }
-  };
-
-  branchAt(.72, 1, .78);
-
-  // Irregular snow shoulders keep the road readable from a low tracking camera.
-  const bankGeo = new THREE.SphereGeometry(1, 11, 7);
-  const banks = new THREE.InstancedMesh(bankGeo, mat(0xe7ebf2, { flatShading: false }), 30);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const s = new THREE.Vector3();
-  let n = 0;
-  for (let i = 0; i < 15; i++) {
-    const t = .17 + i * .055;
-    const p = path.curve.getPointAt(Math.min(t, .98));
-    const tangent = path.curve.getTangentAt(Math.min(t, .98)).normalize();
-    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
-    for (const side of [-1, 1]) {
-      if ((i + (side > 0 ? 1 : 0)) % 3 === 0) continue;
-      const offset = 1.25 + ((i * 7 + side + 13) % 5) * .12;
-      const x = p.x + normal.x * side * offset + tangent.x * ((i % 2) * .22);
-      const z = p.z + normal.z * side * offset + tangent.z * ((i % 2) * .22);
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), i * 1.71 + side);
-      s.set(.72 + (i % 3) * .13, .2 + (i % 2) * .05, .42 + (i % 2) * .08);
-      m.compose(new THREE.Vector3(x, heightAt(x, z) + .025, z), q, s);
-      banks.setMatrixAt(n++, m);
-    }
-  }
-  banks.count = n;
-  banks.receiveShadow = true;
-  detail.add(banks);
-
-  // A half-buried fallen log marks the first bend and adds a readable mid-ground.
-  const logP = path.curve.getPointAt(.425);
-  const logT = path.curve.getTangentAt(.425).normalize();
-  const log = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.16, .21, 2.5, 7), barkMat);
-  trunk.rotation.z = Math.PI / 2;
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(.17, .215, 2.45, 7), snowMat);
-  cap.rotation.z = Math.PI / 2;
-  cap.scale.set(.98, 1, .4);
-  cap.position.y = .14;
-  log.add(trunk, cap);
-  log.position.copy(logP);
-  log.position.x += logT.z * 3.8;
-  log.position.z -= logT.x * 3.8;
-  log.rotation.y = Math.atan2(logT.x, logT.z) + Math.PI / 2;
-  log.position.y = heightAt(log.position.x, log.position.z) + .12;
-  detail.add(log);
-
-  // 一层矮软雪接住追光的小狐狸，保留眼高视线。
-  const glintBank = path.curve.getPointAt(.21);
-  const bend = path.curve.getTangentAt(.21);
-  glintBank.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.02);
-  world.playSnow = glintBank;
-  const bank = new THREE.Mesh(bankGeo, mat(PALETTE.snow, { flatShading: false }));
-  bank.position.set(glintBank.x, heightAt(glintBank.x, glintBank.z), glintBank.z);
-  bank.scale.set(.9, .15, .75);
-  bank.receiveShadow = true;
-  detail.add(bank);
-
-  // 莓枝给眼高镜头提供近景尺度。
-  const twigs = new THREE.InstancedMesh(new THREE.CylinderGeometry(.013, .021, 1, 5), barkMat, 20);
-  const berries = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.047, 0), mat(0xb24d5a), 60);
-  const up = new THREE.Vector3(0, 1, 0), stem = new THREE.Vector3(), center = new THREE.Vector3();
-  for (let i = 0; i < 10; i++) {
-    const t = .24 + .072 * i, tangent = path.curve.getTangentAt(t);
-    const p = path.curve.getPointAt(t).addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), (1.65 + rand() * .35) * (i % 2 ? -1 : 1));
-    p.y = heightAt(p.x, p.z) + .02;
-    for (let j = 0; j < 2; j++) {
-      stem.set((j ? 1 : -1) * (.17 + .1 * rand()), .32 + .24 * rand(), .08 - .16 * rand());
-      q.setFromUnitVectors(up, stem.clone().normalize());
-      m.compose(center.copy(p).addScaledVector(stem, .5), q, s.set(1, stem.length(), 1));
-      twigs.setMatrixAt(i * 2 + j, m);
-      for (let n = 0; n < 3; n++) {
-        center.copy(p).addScaledVector(stem, .58 + n * .18);
-        m.makeTranslation(center.x, center.y, center.z + (n % 2 ? .032 : -.032));
-        berries.setMatrixAt(i * 6 + j * 3 + n, m);
-      }
-    }
-  }
-  detail.add(twigs, berries);
-  scene.add(detail);
-  world.pathDetails = detail;
 }
 
 // —— 路灯：沿路交替排布。灯罩发光 + 地面光晕贴片，真点光只留终点两盏 ——
@@ -567,9 +403,10 @@ function buildLamps(scene, world, path, heightAt) {
   }
 }
 
-function makeLowLantern(scene, position) {
+function makeLowLantern(scene, position, scale = 1) {
   const group = new THREE.Group();
   group.position.copy(position);
+  group.scale.setScalar(scale);
   const metal = mat(0x4f3a4a);
   const glass = mat(0xffce8e, { emissive: 0xffaf56, emissiveIntensity: 0 });
   const bulb = new THREE.Mesh(new THREE.BoxGeometry(.27, .25, .27), glass);
@@ -589,7 +426,7 @@ function makeLowLantern(scene, position) {
   scene.add(group);
   return {
     bulb,
-    position: position.clone().add(bulb.position),
+    position: position.clone().addScaledVector(bulb.position, scale),
     setGlow(amount) {
       glass.emissiveIntensity = .04 + amount * 2.3;
       halo.material.opacity = amount * .66;
@@ -604,9 +441,9 @@ function buildCourtyard(scene, world, heightAt) {
   const wallMat = mat(0xaab3be);
   const wallGeo = new THREE.BoxGeometry(1.32, 0.58, 0.42);
   const cx = 0.2, cz = -28.2;
-  const lowLight = new THREE.Vector3(cx + 1.48, heightAt(cx + 1.48, cz + 1.05), cz + 1.05);
+  const lowLight = new THREE.Vector3(cx + .62, heightAt(cx + .62, cz + 1.72), cz + 1.72);
   world.courtyardLantern = makeLowLantern(g, lowLight);
-  world.lanternFox = lowLight.clone().add(new THREE.Vector3(.53, 0, .05));
+  world.lanternFox = lowLight.clone().add(new THREE.Vector3(.41, 0, -.12));
   for (let i = 0; i < 12; i++) {
     const a = Math.PI * (0.10 + (i / 11) * 0.80); // 朝北半弧，开口向南（来路）
     const x = cx + Math.cos(a) * 4.75;
