@@ -12,6 +12,7 @@ export class UI {
     this._buildPrompt();
     this._buildInspect();
     this._buildToast();
+    this._buildNameKicker();
     this._buildLetter();
     this._buildControls();
     this._buildBadge(source);
@@ -59,16 +60,31 @@ export class UI {
     this.noteText=this._el('div', 'note-text', card, esc(this.config.note));
     this._el('div', 'note-sign', card, `—— ${esc(this.config.fromName)}`);
     const row = this._el('div', 'inspect-actions', this.inspectPanel);
-    const flip = this._el('button', 'btn-ghost', row, '翻面看看');
-    flip.addEventListener('click', () => this.onIntent({ type: 'flip' }));
-    const go = this._el('button', 'btn-primary small', row, '晃一晃星光');
-    go.addEventListener('click', () => this.onIntent({ type: 'continue' }));
-    this._el('div', 'inspect-hint', this.inspectPanel, '拖动可以转动星星');
+    this.flipBtn = this._el('button', 'btn-primary small', row, '翻面看看');
+    this.flipBtn.addEventListener('click', () => this.onIntent({ type: 'flip' }));
+    this.goBtn = this._el('button', 'btn-ghost', row, '洒一点星光');
+    this.goBtn.addEventListener('click', () => this.onIntent({ type: 'continue' }));
+    this.inspectHint = this._el('div', 'inspect-hint', this.inspectPanel, '背面好像还有一行字');
   }
 
   _buildToast() {
     this.toastEl = this._el('div', 'toast hide');
     this._toastTimer = null;
+  }
+
+  _buildNameKicker() {
+    this.nameKicker = this._el('div', 'name-kicker hide');
+  }
+
+  setNameKicker(name) {
+    if (!this.nameKicker) return;
+    if (name) {
+      const html = `给 <b>${esc(name)}</b> 的星星`;
+      if (this.nameKicker.innerHTML !== html) this.nameKicker.innerHTML = html;
+      this.nameKicker.classList.remove('hide');
+    } else {
+      this.nameKicker.classList.add('hide');
+    }
   }
 
   _buildLetter() {
@@ -84,7 +100,7 @@ export class UI {
     const close = this._el('button', 'btn-primary small', paper, '收好这封信');
     close.addEventListener('click', () => {
       this.letter.classList.add('hide');
-      this._showEnd();
+      this._showReply();
     });
   }
 
@@ -98,6 +114,63 @@ export class UI {
     const again = this._el('a', '', row, '再走一遍');
     again.href = location.pathname + location.search + location.hash;
     again.addEventListener('click', () => location.reload());
+  }
+
+  _showReply() {
+    if (this.reply) { this.reply.classList.remove('hide'); return; }
+    this.reply = this._el('div', 'reply');
+    const box = this._el('div', 'reply-box', this.reply);
+    this._el('div', 'reply-q', box, `这个圣诞，愿意和我${esc(this.config.activity)}吗？`);
+    const row = this._el('div', 'reply-row', box);
+    const yes = this._el('button', 'btn-primary', row, '愿意');
+    const think = this._el('button', 'btn-ghost', row, '让我想想');
+    yes.addEventListener('click', () => this.onIntent({ type: 'reply', kind: 'yes' }));
+    think.addEventListener('click', () => this.onIntent({ type: 'reply', kind: 'think' }));
+  }
+
+  showReply(kind, config) {
+    if (!this.reply) return;
+    const box = this.reply.querySelector('.reply-box');
+    box.innerHTML = '';
+    if (kind === 'yes') {
+      this._el('div', 'reply-q', box, '灯为你亮着，路也记住了。');
+      this._el('p', 'reply-sub', box, '愿这一路的温柔，陪你走进下一个冬天。');
+    } else {
+      this._el('div', 'reply-q', box, '没关系。灯会一直亮着。');
+      this._el('p', 'reply-sub', box, '你想好了再来，狐狸和我都在。');
+    }
+    const row = this._el('div', 'reply-row', box);
+    const save = this._el('button', 'btn-primary small', row, '保存这一刻');
+    save.addEventListener('click', () => this._savePoster(config));
+    const again = this._el('a', 'reply-again', row, '再走一遍');
+    again.href = location.pathname + location.search + location.hash;
+    again.addEventListener('click', () => location.reload());
+  }
+
+  _savePoster(config) {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return;
+    const w = 1080, h = 1350;
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#0e1430'; ctx.fillRect(0, 0, w, h);
+    const scale = Math.max(w / canvas.width, (h * 0.72) / canvas.height);
+    const dw = canvas.width * scale, dh = canvas.height * scale;
+    ctx.drawImage(canvas, (w - dw) / 2, 0, dw, dh);
+    const grad = ctx.createLinearGradient(0, h * 0.6, 0, h);
+    grad.addColorStop(0, 'rgba(14,20,48,0)'); grad.addColorStop(1, 'rgba(14,20,48,0.96)');
+    ctx.fillStyle = grad; ctx.fillRect(0, h * 0.6, w, h * 0.4);
+    ctx.fillStyle = '#ffd9a0'; ctx.textAlign = 'center';
+    ctx.font = '600 64px "Songti SC","Noto Serif SC",serif';
+    ctx.fillText(`给 ${config.toName} 的一场雪夜迎接`, w / 2, h * 0.82);
+    ctx.fillStyle = '#cfd6ee'; ctx.font = '34px "Songti SC","Noto Serif SC",serif';
+    ctx.fillText(config.starText, w / 2, h * 0.88);
+    ctx.fillStyle = '#8b96b8'; ctx.font = '28px "Songti SC","Noto Serif SC",serif';
+    ctx.fillText(`—— ${config.fromName} · ${new Date().toISOString().slice(0, 10)}`, w / 2, h * 0.93);
+    const a = document.createElement('a');
+    a.download = `snow-night-${config.toName}.png`;
+    a.href = cv.toDataURL('image/png');
+    a.click();
   }
 
   _buildControls() {
@@ -143,10 +216,16 @@ export class UI {
     }
   }
 
-  setInspect(active, config=this.config, flipped=false) {
+  setInspect(active, config=this.config, flipped=false, flippedOnce=false) {
     const text=flipped?config.starText:config.note;
     if(this.noteText.textContent!==text)this.noteText.textContent=text;
     this.inspectPanel.querySelector('.note-kicker').textContent=flipped?'星星背面的话':'小狐狸带来的纸条';
+    if (this.flipBtn && this.goBtn) {
+      this.flipBtn.className = flippedOnce ? 'btn-ghost' : 'btn-primary small';
+      this.goBtn.className = flippedOnce ? 'btn-primary small' : 'btn-ghost';
+      const hint = flippedOnce ? '把它收好，我们继续' : '背面好像还有一行字';
+      if (this.inspectHint.textContent !== hint) this.inspectHint.textContent = hint;
+    }
     this._toggle(this.inspectPanel, active);
   }
 
@@ -178,6 +257,8 @@ export class UI {
     this.setPrompt(null);
     this.setInspect(false);
     if (this.end) this.end.classList.add('hide');
+    if (this.nameKicker) this.nameKicker.classList.add('hide');
+    if (this.reply) this.reply.classList.add('hide');
   }
 
   showLetter() {

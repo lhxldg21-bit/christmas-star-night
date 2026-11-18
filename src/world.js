@@ -86,8 +86,12 @@ export function buildWorld(scene, rand) {
   const cSnow = new THREE.Color(PALETTE.snow);
   const cShade = new THREE.Color(PALETTE.snowShade);
   const tmp = new THREE.Color();
+  // Keep the trail tessellation and stretch the outskirts beyond the crane view.
+  const extend = (v) => v + Math.sign(v) * 94 * (Math.max(0, Math.abs(v) - 44) / 31) ** 2;
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i);
+    const x = extend(pos.getX(i)), z = extend(pos.getZ(i));
+    pos.setX(i, x);
+    pos.setZ(i, z);
     const h = heightAt(x, z);
     pos.setY(i, h);
     const d = distFromOrigin(x, z);
@@ -147,8 +151,9 @@ export function buildWorld(scene, rand) {
   buildPathDetails(scene, world, rand, heightAt, path);
   buildLamps(scene, world, path, heightAt);
   buildCourtyard(scene, world, heightAt);
-  buildDistantHills(scene, rand);
+  world.ridgeMaterials = buildDistantHills(scene, rand);
   world.snow = buildSnowfall(scene, rand);
+  world.sparkle = buildSparkle(scene, rand, heightAt);
   return world;
 }
 
@@ -704,26 +709,63 @@ function buildCourtyard(scene, world, heightAt) {
 
 // —— 远景体量：雾外的深色山脊与松树剪影环 ——
 function buildDistantHills(scene, rand) {
-  const hillMat = new THREE.MeshBasicMaterial({ color: 0x314b63, fog: true });
   const geo = new THREE.SphereGeometry(1, 10, 7);
-  const hills = new THREE.InstancedMesh(geo, hillMat, 14);
+  const near = new THREE.Color(0x2c4459), far = new THREE.Color(PALETTE.nightHorizon);
+  const layers = [
+    { r: 78, n: 8, s: 24, k: 0.25 },
+    { r: 104, n: 9, s: 30, k: 0.5 },
+    { r: 132, n: 10, s: 38, k: 0.74 },
+  ];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + rand() * 0.3;
-    const r = 95 + rand() * 45;
-    const s = 26 + rand() * 30;
-    q.setFromAxisAngle(up, rand() * Math.PI);
-    m.compose(
-      new THREE.Vector3(Math.cos(a) * r, -s * 0.14, Math.sin(a) * r),
-      q,
-      new THREE.Vector3(s, s * 0.5, s),
-    );
-    hills.setMatrixAt(i, m);
+  const materials = [];
+  for (const L of layers) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, depthWrite: false });
+    materials.push(mat);
+    const hills = new THREE.InstancedMesh(geo, mat, L.n);
+    const col = new THREE.Color().copy(near).lerp(far, L.k);
+    for (let i = 0; i < L.n; i++) {
+      const a = (i / L.n) * Math.PI * 2 + rand() * 0.4;
+      const r = L.r + rand() * 18;
+      const s = L.s + rand() * 16;
+      q.setFromAxisAngle(up, rand() * Math.PI);
+      m.compose(new THREE.Vector3(Math.cos(a) * r, -s * 0.16, Math.sin(a) * r), q, new THREE.Vector3(s, s * 0.5, s));
+      hills.setMatrixAt(i, m);
+      hills.setColorAt(i, col);
+    }
+    scene.add(hills);
   }
-  scene.add(hills);
+  return materials;
 }
 
 // —— 落雪：解析式位置（纯时间函数），恒定 1400 粒，镜头周围循环包裹 ——
+function buildSparkle(scene, rand, heightAt) {
+  const layers = [];
+  for (let L = 0; L < 2; L++) {
+    const N = 260;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const a = rand() * Math.PI * 2, r = 2 + rand() * 26;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r - 6;
+      pos[i * 3] = x; pos[i * 3 + 1] = heightAt(x, z) + 0.02; pos[i * 3 + 2] = z;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+      map: makeGlowTexture('#fff6e0', '#fff6e000'), color: 0xfff2cf, size: 0.05,
+      transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    }));
+    pts.frustumCulled = false;
+    scene.add(pts);
+    layers.push(pts);
+  }
+  return {
+    update(t) {
+      layers[0].material.opacity = 0.18 + 0.4 * Math.max(0, Math.sin(t * 1.7));
+      layers[1].material.opacity = 0.18 + 0.4 * Math.max(0, Math.sin(t * 1.7 + Math.PI));
+    },
+  };
+}
+
 function buildSnowfall(scene, rand) {
   const N = 900;
   const pos = new Float32Array(N * 3);

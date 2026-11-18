@@ -28,3 +28,12 @@ Static review cannot verify motion/audio; separately validate flow, transitions 
 - Placement is gated by real proximity rather than route progress. The player walks to the plinth, raises the star, and places it over 2.15 seconds. The final star scale/rest offset puts its lower point against the top ring instead of intersecting or floating above the pedestal.
 - Final review captures: `v9/00-first.png` through `15-letter.png` in the review output directory, covering first frame, wait/invite/cover/snow/shake/hop/return, placement, lighting, pullback and letter.
 - Remaining P3: stylized pine cones and snowbank facets repeat; the snow clump is intentionally graphic and slightly theatrical; live motion/audio and a trustworthy independent blind review are still required.
+
+
+## v10 Qwen preview and follow-up — 2026-11-18
+
+- The star has a berry ribbon, a sealed note, and a swinging name tag. The inspection panel prioritizes flipping until the first flip. A smaller star stays visible as a lantern during the walk.
+- Bloom is softer during pickup and builds as the courtyard lights up. The opening gate has no overhead beam. The crane view crosses extended snow terrain while the distant ridges fade.
+- The fox pauses after pouncing and returns to the trail while the camera gradually reframes. Its four paws lift in staggered phases, with less body bounce and slower movement through turns.
+- The wider look range while walking remains available. Tap targets include the star and fox. The letter can lead to a reply panel and downloadable poster.
+- The production build passed. Browser checks covered the pickup, pounce recovery, and crane frames. Full content-script verification requires the local `3dpy` runner. Real-device motion and audio still need a pass.

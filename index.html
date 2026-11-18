@@ -127,6 +127,14 @@ canvas{display:block;position:fixed;inset:0}
 .letter-body{font-size:15px;line-height:2}.letter-to{font-size:17px}
 @media(max-width:500px){.note-card{padding:16px 20px}.note-text{font-size:14px}.inspect{padding:14px 20px 22px}.note-kicker{margin-bottom:8px}.note-sign{margin-top:5px}.letter-paper{padding:17px 20px;max-height:55vh}.letter-body{font-size:14px;line-height:1.72}.sound-bar{font-size:11px}.journey-hint{font-size:11px;bottom:22px}}
 @media(prefers-reduced-motion:reduce){.cover,.cover-box,.btn-primary{animation:none;transition:none}}
+.name-kicker{position:absolute;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);color:#ffd9a0;font-size:15px;letter-spacing:.18em;text-shadow:0 2px 14px #000a;animation:rise .5s ease both;pointer-events:none}
+.name-kicker b{color:#fff;font-weight:600}
+.reply{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,14,36,.5);backdrop-filter:blur(3px);animation:fadein .8s ease both;padding:20px}
+.reply-box{text-align:center;color:var(--snow);max-width:30rem;background:rgba(17,31,44,.72);border:1px solid #dcc6a255;border-radius:6px;padding:34px 30px}
+.reply-q{font-size:1.35rem;letter-spacing:.12em;line-height:1.7;color:var(--amber-soft);margin-bottom:12px}
+.reply-sub{font-size:.95rem;line-height:1.9;color:#c3cbe8;margin:0 0 20px}
+.reply-row{display:flex;gap:16px;justify-content:center;align-items:center;flex-wrap:wrap}
+.reply-again{color:var(--amber-soft);text-decoration:none;border-bottom:1px dashed rgba(255,217,160,.5);font-size:.95rem}
 </style>
 </head>
 <body>

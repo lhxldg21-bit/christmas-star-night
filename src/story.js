@@ -111,6 +111,7 @@ export class Story {
       moving: 0,
       sitting: 1,
       gagT: -1,
+      recoveryT: 0,
       offerT: -1,
       offered: false,
     };
@@ -141,6 +142,14 @@ export class Story {
     this.lampTimer = -1;
     this.lampsLit = 0;
     this.toastUntil = -1;
+    this.flippedOnce = false;
+    this.holdWalk = false;
+    this.lookActive = false;
+    this.foxReactT = -1;
+    this.stealT = -1;
+    this.nameKickerT = -1;
+    this.replyT = -1;
+    this.replyKind = null;
     this.intents = [];
     this.autoScript = this.auto ? buildAutoScript() : [];
     // 灯与底座复位（重放/循环用）
@@ -186,10 +195,11 @@ export class Story {
       this._handleIntent(it);
     }
 
+    if (this.holdWalk && this.state === 'walk' && !this.p.target) this._handleIntent({ type: 'advance' });
     if (this.state === 'intro' && ((this.intro += dt) >= 1.55 || this.reducedMotion)) this.state = 'walk';
-    if (this.state !== 'walk' || this.p.target) {
-      this.look.yaw *= Math.exp(-7 * dt);
-      this.look.pitch *= Math.exp(-7 * dt);
+    if (!this.lookActive && (this.state !== 'walk' || this.p.idleTime > 2.5)) {
+      this.look.yaw *= Math.exp(-3 * dt);
+      this.look.pitch *= Math.exp(-3 * dt);
     }
     this._updatePlayer(dt);
     this._updateFox(dt);
@@ -228,13 +238,19 @@ export class Story {
           this.p.yaw = Math.atan2(this.starGroundPos.x-this.p.pos.x,this.starGroundPos.z-this.p.pos.z);
           this.pickupFrom = this.star.position.clone();
           this.inspect.yaw = 0; this.inspect.pitch = 0.0;
+          this.nameKickerT = 0; this._haptic(12);
           this.audio.chime();
         }
         break;
       case 'flip':
-        if (this.state === 'inspect') { this.inspect.yaw += Math.PI; this.audio.chime(); }
+        if (this.state === 'inspect') { this.inspect.yaw += Math.PI; this.flippedOnce = true; this.audio.chime(); this._haptic(8); }
         break;
       case 'continue':
+        if (this.state === 'inspect' && !this.flippedOnce) {
+          this.stealT = 0; this.foxReactT = 0; this.flippedOnce = true;
+          this.inspect.yaw += Math.PI; this.audio.chime(); this._haptic(10);
+          break;
+        }
         if (this.state === 'inspect') {
           this.state = 'gag';
           this.starState = 'carried';
@@ -256,7 +272,19 @@ export class Story {
           this.p.target = this.placeSpot.clone();
         }
         break;
+      case 'foxTap':
+        if (this.foxReactT < 0) { this.foxReactT = 0; this.audio.chime(); this._haptic(6); }
+        break;
+      case 'reply':
+        this.replyKind = it.kind; this.replyT = 0;
+        this._haptic(it.kind === 'yes' ? 18 : 8);
+        if (this.ui) this.ui.showReply(it.kind, this.config);
+        break;
     }
+  }
+
+  _haptic(ms) {
+    if (!this.auto && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(ms);
   }
 
   _followRoute(progress) {
@@ -378,15 +406,19 @@ export class Story {
       f.gagT += dt;
       f.moving = 0;
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
-      if (f.gagT >= 1.45) f.mode = 'comeback';
+      if (f.gagT >= 1.65) {
+        f.mode = 'comeback';
+        f.recoveryT = 0;
+      }
     } else if (f.mode === 'comeback') {
+      f.recoveryT += dt;
       const t = Math.min(.98, this._progress(this.p.pos) + .106);
       target = path.curve.getPointAt(t);
       const tangent = path.curve.getTangentAt(t);
       target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .83);
-      speed = RUN * .9;
+      speed = THREE.MathUtils.lerp(.85, 2.0, THREE.MathUtils.smoothstep(f.recoveryT, 0, .8));
       f.sitting = Math.max(0, f.sitting - dt * 6);
-      if (f.pos.distanceTo(target) < .32) {
+      if (f.pos.distanceTo(target) < .24 && f.recoveryT > 1.15) {
         f.mode = 'lead';
         this.state = 'walk';
         this.toastUntil = this.time + 1.8;
@@ -410,11 +442,12 @@ export class Story {
       if (dist > 0.06) {
         const desiredYaw = Math.atan2(dx, dz);
         f.yaw = dampAngle(f.yaw, desiredYaw, 9, dt);
-        const step = Math.min(speed * dt, dist);
+        const alignment = Math.max(.18, Math.cos(desiredYaw - f.yaw));
+        const step = Math.min(speed * alignment, dist * 5) * dt;
         f.pos.x += dx / dist * step;
         f.pos.z += dz / dist * step;
-        f.moving = Math.min(1, f.moving + dt * 7);
-        f.phase += step * 7.5;
+        f.moving = THREE.MathUtils.damp(f.moving, Math.min(1, step / dt / 2), 10, dt);
+        f.phase += step * 11;
         f.stride += step;
         const FSTRIDE = 0.3;
         if (f.stride >= FSTRIDE) {
@@ -439,6 +472,14 @@ export class Story {
     g.rotation.z = 0;
     this.fox.pose(f.phase, f.moving, f.sitting, this.time);
     const head = this.fox.parts.headPivot;
+    const toPlayer = Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z);
+    let rel = toPlayer - f.yaw;
+    while (rel > Math.PI) rel -= Math.PI * 2; while (rel < -Math.PI) rel += Math.PI * 2;
+    head.rotation.y = THREE.MathUtils.clamp(rel, -.85, .85) * (1 - .75 * f.moving);
+    if (this.foxReactT >= 0) {
+      g.position.y += Math.sin(Math.PI * this.foxReactT / 0.9) * .18;
+      this.fox.parts.tailPivot.rotation.y = Math.sin(this.foxReactT * 30) * .4;
+    }
     if (f.mode === 'offer') {
       const dip = Math.sin(Math.PI * f.offerT / 1.1);
       head.position.y -= dip * .11;
@@ -462,8 +503,15 @@ export class Story {
 
   _updateStar(dt) {
     const s = this.star;
-    s.visible = this.starState !== 'carried' || (this.state === 'gag' && this.f.mode !== 'comeback');
-    const targetScale = ['pickup', 'inspect', 'carried'].includes(this.starState) ? .70 : 1.16;
+    s.visible = true;
+    const ud = s.userData;
+    const tt = this.time;
+    if (ud.bowTails) for (let i = 0; i < ud.bowTails.length; i++)
+      ud.bowTails[i].rotation.x = Math.sin(tt * 2.2 + i * 1.7) * .22;
+    if (ud.tagPivot) ud.tagPivot.rotation.z = Math.sin(tt * 1.3) * .14;
+    const targetScale = this.starState === 'carried'
+      ? (this.state === 'gag' ? .70 : .52)
+      : (['pickup', 'inspect'].includes(this.starState) ? .70 : 1.16);
     const sc = s.scale.x + (targetScale - s.scale.x) * Math.min(1, 6 * dt);
     s.scale.setScalar(sc);
     const L = s.userData.light;
@@ -471,10 +519,17 @@ export class Story {
     const focus = this.f.pos.clone();
     if (this.state === 'gag') focus.lerp(this.world.starPatch.position, .42);
     const view = focus.sub(this.p.pos).setY(0).normalize();
+    if (this.starState === 'carried' && this.camInit) {
+      const cameraForward = this.camLook.clone().sub(this.camPos).setY(0).normalize();
+      const carryBlend = this.state !== 'gag' ? 1 : this.f.mode === 'comeback'
+        ? THREE.MathUtils.smoothstep(this.f.recoveryT, .1, 1.15) : 0;
+      view.lerp(cameraForward, carryBlend).normalize();
+    }
     const viewSide = new THREE.Vector3(-view.z, 0, view.x);
-    this.inspect.anchor.copy(this.p.pos).addScaledVector(view, .96)
-      .addScaledVector(viewSide, this.state === 'gag' ? -.16 : -.15)
-      .add(new THREE.Vector3(0, this.state === 'gag' ? .68 : .92, 0));
+    const lantern = this.starState === 'carried' && this.state !== 'gag';
+    this.inspect.anchor.copy(this.p.pos).addScaledVector(view, lantern ? .82 : .96)
+      .addScaledVector(viewSide, lantern ? -.34 : (this.state === 'gag' ? -.16 : -.15))
+      .add(new THREE.Vector3(0, lantern ? .62 : (this.state === 'gag' ? .68 : .92), 0));
     const patch = this.world.starPatch;
     patch.visible = this.state === 'inspect' || (this.state === 'gag' && this.f.mode !== 'comeback');
     patch.material.opacity = this.f.mode === 'peek' ? .76 * (1 - THREE.MathUtils.smoothstep(this.f.gagT, 0, .8)) : .76;
@@ -484,15 +539,15 @@ export class Story {
         .addScaledVector(side, .6 + Math.sin(this.inspect.yaw) * .55);
     }
     if (patch.visible) patch.position.y = this.world.heightAt(patch.position.x, patch.position.z) + .045;
-    s.userData.halo.material.opacity=this.starState==='placed' ? .65 : .12;
-    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.12 : .68;
+    s.userData.halo.material.opacity=this.starState==='placed' ? .65 : (lantern ? .2 : .12);
+    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.12 : (this.starState==='carried' ? .85 : .8);
     if (this.starState === 'ground') {
       L.intensity = 2.4;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
       s.rotation.y = Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z);
     } else if (this.starState === 'inspect') {
       s.position.lerp(this.inspect.anchor, 1 - Math.exp(-8 * dt));
-      s.rotation.y = dampAngle(s.rotation.y, Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z) + this.inspect.yaw, 10, dt);
+      s.rotation.y = dampAngle(s.rotation.y, Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z) + this.inspect.yaw + Math.sin(tt*0.9)*0.12, 10, dt);
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
@@ -510,6 +565,10 @@ export class Story {
   }
 
   _updateBeats(dt) {
+    if (this.nameKickerT >= 0) { this.nameKickerT += dt; if (this.nameKickerT > 2.2) this.nameKickerT = -1; }
+    if (this.foxReactT >= 0) { this.foxReactT += dt; if (this.foxReactT > 0.9) this.foxReactT = -1; }
+    if (this.stealT >= 0) { this.stealT += dt; if (this.stealT > 1.6) this.stealT = -1; }
+    if (this.replyT >= 0) this.replyT += dt;
     if(this.state==='pickup') {
       this.pickupT+=dt;
       const k=THREE.MathUtils.smoothstep(this.pickupT,.7,2.4);
@@ -611,15 +670,25 @@ export class Story {
         const reveal = THREE.MathUtils.smoothstep(this.awakenT, .65, 2.8);
         goalLook.lerp(this.world.basePos.clone().add(new THREE.Vector3(0, 1.43, -7)), reveal);
       }
-    } else if (['pickup', 'inspect', 'gag'].includes(this.state)) {
+    } else if (['pickup', 'inspect'].includes(this.state)) {
       goalLook = this.f.pos.clone().add(new THREE.Vector3(0, .53, 0));
-      if (this.world.starPatch.visible) goalLook.lerp(this.world.starPatch.position, this.state === 'inspect' ? .12 : .39);
+      if (this.world.starPatch.visible) goalLook.lerp(this.world.starPatch.position, .12);
     } else if (this.starState === 'ground') {
       goalLook = this.starGroundPos.clone().lerp(this.f.pos, .36).add(new THREE.Vector3(0, .20, 0));
     } else {
       goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .145))
         .lerp(this.f.pos, .09).add(new THREE.Vector3(0, .88, 0));
       goalLook.lerp(this.world.baseTop, .82 * THREE.MathUtils.smoothstep(pr, .83, 1));
+      if (this.state === 'gag') {
+        const landing = this.world.starPatch.position;
+        const patchWeight = this.f.mode === 'chase'
+          ? THREE.MathUtils.smoothstep(this.f.gagT, .18, 1.3) * .33
+          : (this.f.mode === 'peek' ? .33 * (1 - THREE.MathUtils.smoothstep(this.f.gagT, .2, 1.5)) : 0);
+        const playLook = this.f.pos.clone().add(new THREE.Vector3(0, .53, 0)).lerp(landing, patchWeight);
+        const returnLook = this.f.mode === 'comeback'
+          ? THREE.MathUtils.smoothstep(this.f.recoveryT, .1, 1.15) : 0;
+        goalLook.lerp(playLook, 1 - returnLook);
+      }
     }
     if (this.state === 'cover' || this.state === 'intro') {
       const wide = this.world.path.samples[0].clone().add(new THREE.Vector3(1, 3.5, 3.9));
@@ -635,14 +704,14 @@ export class Story {
     }
     const k = this.camInit && dt && !this.reducedMotion ? 1 - Math.exp(-7 * dt) : 1;
     this.camPos.lerp(goalPos, k);
-    this.camLook.lerp(goalLook, this.camInit && dt && !this.reducedMotion && this.state === 'walk' ? 1 - Math.exp(-3.6 * dt) : k);
+    this.camLook.lerp(goalLook, this.camInit && dt && !this.reducedMotion && ['walk', 'gag'].includes(this.state) ? 1 - Math.exp(-3.6 * dt) : k);
     this.camInit = true;
     camera.position.copy(this.camPos);
     camera.lookAt(this.camLook);
     camera.rotateY(this.look.yaw);
     camera.rotateX(this.look.pitch);
     this.hands.visible = ['pickup', 'inspect', 'placing'].includes(this.state) ||
-      (this.state === 'gag' && this.f.mode !== 'comeback');
+      this.starState === 'carried';
     if (this.hands.visible) {
       this.hands.position.copy(this.star.position);
       this.hands.scale.setScalar(this.state === 'placing' ? .97 : .74);
@@ -659,12 +728,15 @@ export class Story {
       this.state === 'walk' && !this.p.target && this.f.offered && nearStar ? '拾起星星' :
       this.state === 'walk' && !this.p.target && nearBase ? '安放星星' : null,
     );
-    this.ui.setInspect(this.state === 'inspect', this.config, Math.abs(Math.sin(this.inspect.yaw/2))>.7);
+    const flipped = this.flippedOnce && Math.abs(Math.sin(this.inspect.yaw / 2)) > .7;
+    this.ui.setInspect(this.state === 'inspect', this.config, flipped, this.flippedOnce);
     this.ui.setJourney(
       this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > .25,
       this.starState === 'ground' ? '跟着暖光走' : '跟上小狐狸',
     );
-    this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
+    this.ui.setNameKicker(this.nameKickerT >= 0 && this.nameKickerT < 2.2 ? this.config.toName : null);
+    const stealToast = this.stealT >= 0 && this.stealT < 1.6 ? this.config.starText : null;
+    this.ui.setToast(stealToast || (this.time < this.toastUntil ? this.config.walkLine : null));
   }
 }
 

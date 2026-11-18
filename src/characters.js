@@ -1,4 +1,6 @@
-// 角色：低多边形参数化人物与狐狸。动画全部是相位的纯函数，可确定性复现。
+// 角色：低多边形参数化人物与狐狸。动画全部是相位/时间的纯函数，可确定性复现。
+// Lane A（光遇道）：光滑着色 + 顶点色渐变 + 自发光泛光；星星被做成「狐狸送达的包裹」
+// （蝴蝶结 / 折信纸 / 火漆星章 / 会摆动的挂签），让「上面有东西」一眼可读。
 import * as THREE from 'three';
 import { PALETTE } from './world.js';
 
@@ -6,7 +8,20 @@ function mat(color, opts = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, flatShading: true, ...opts });
 }
 
-// —— 星星：五角挤出形，挂签写"给 TA"，背面短句。检视时可旋转翻面 ——
+function paintGradient(geo, bottomHex, topHex, axis = 'y', lo = -1, hi = 1) {
+  const pos = geo.attributes.position;
+  const cb = new THREE.Color(bottomHex), ct = new THREE.Color(topHex), tmp = new THREE.Color();
+  const arr = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const v = axis === 'y' ? pos.getY(i) : axis === 'x' ? pos.getX(i) : pos.getZ(i);
+    const k = THREE.MathUtils.clamp((v - lo) / (hi - lo), 0, 1);
+    tmp.copy(cb).lerp(ct, k);
+    arr[i * 3] = tmp.r; arr[i * 3 + 1] = tmp.g; arr[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+
 export function buildStar(config) {
   const group = new THREE.Group();
   const shape = new THREE.Shape();
@@ -28,8 +43,8 @@ export function buildStar(config) {
   const facets = [];
   for (let i = 0; i < 10; i++) {
     const edge = (j) => {
-      const a = j * Math.PI / 5 + Math.PI / 2, r = j % 2 === 0 ? R : .10;
-      return [Math.cos(a) * r, Math.sin(a) * r, .024];
+      const a = j * Math.PI / 5 + Math.PI / 2, rr = j % 2 === 0 ? R : .10;
+      return [Math.cos(a) * rr, Math.sin(a) * rr, .024];
     };
     facets.push(0, 0, .105, ...edge(i), ...edge(i + 1));
   }
@@ -47,33 +62,72 @@ export function buildStar(config) {
   star.castShadow = true;
   group.add(star);
 
-  // 背面短句：Canvas 纹理小牌
+  const berry = mat(PALETTE.berry, { flatShading: false, roughness: .6 });
+  const paper = mat(0xf6ecd9, { flatShading: false, roughness: .95 });
+
+  const bow = new THREE.Group();
+  const loopGeo = new THREE.TorusGeometry(.045, .017, 6, 12);
+  for (const side of [-1, 1]) {
+    const loop = new THREE.Mesh(loopGeo, berry);
+    loop.scale.set(1, .72, .42);
+    loop.position.set(side * .05, 0, 0);
+    loop.rotation.y = side * .5;
+    bow.add(loop);
+  }
+  const knot = new THREE.Mesh(new THREE.SphereGeometry(.026, 8, 6), berry);
+  knot.scale.set(1, .85, .8);
+  bow.add(knot);
+  const bowTails = [];
+  for (const side of [-1, 1]) {
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(.022, .10, .006), berry);
+    tail.geometry.translate(0, -.05, 0);
+    tail.position.set(side * .018, -.02, .004);
+    tail.rotation.z = side * .28;
+    bow.add(tail);
+    bowTails.push(tail);
+  }
+  bow.position.set(0, R + .015, .03);
+  group.add(bow);
+
+  const note = new THREE.Group();
+  const sheet = new THREE.Mesh(new THREE.BoxGeometry(.17, .115, .006), paper);
+  const fold = new THREE.Mesh(new THREE.BoxGeometry(.17, .03, .006), mat(0xe7d9bf, { flatShading: false }));
+  fold.position.set(0, .058, .004); fold.rotation.x = -.5;
+  const seal = new THREE.Mesh(new THREE.CylinderGeometry(.022, .022, .007, 12), berry);
+  seal.rotation.x = Math.PI / 2; seal.position.set(.045, -.028, .006);
+  const sealStar = new THREE.Mesh(new THREE.CircleGeometry(.012, 5), mat(0xffe2a7, { flatShading: false }));
+  sealStar.position.set(.045, -.028, .011);
+  note.add(sheet, fold, seal, sealStar);
+  note.position.set(-.16, -.20, .05);
+  note.rotation.set(-.18, .35, .12);
+  group.add(note);
+
+  const tagPivot = new THREE.Group();
+  tagPivot.position.set(.12, -.20, .03);
+  const string = new THREE.Mesh(new THREE.CylinderGeometry(.004, .004, .12, 5), berry);
+  string.position.y = -.06;
+  const hang = makeTextPlate(`给 ${config.toName}`, 256, 96, '#f6ecd9', '#5a4a6a');
+  hang.scale.set(.62, .62 * (96 / 256) * 2.0, 1);
+  hang.position.y = -.165;
+  tagPivot.add(string, hang);
+  group.add(tagPivot);
+
   const tag = makeTextPlate(config.starText, 256, 128, '#7a4a12', '#ffdf9e');
   tag.position.z = -0.045;
   tag.rotation.y = Math.PI;
   tag.scale.setScalar(0.9);
-  tag.visible = false;
   group.add(tag);
-
-  // 挂签：给 TA
-  const hang = makeTextPlate(`给 ${config.toName}`, 256, 80, '#f3eee6', '#5a4a6a');
-  hang.position.set(0, -0.24, 0.01);
-  hang.scale.set(0.55, 0.55 * 0.31, 1);
-  hang.visible = false;
-  group.add(hang);
 
   const light = new THREE.PointLight(PALETTE.starAmber, 1.1, 7, 1.7);
   group.add(light);
 
   const cv = document.createElement('canvas'); cv.width = cv.height = 128;
-  const ctx = cv.getContext('2d'), grad = ctx.createRadialGradient(64,64,2,64,64,64);
-  grad.addColorStop(0,'#fff0c2aa'); grad.addColorStop(.25,'#ffcb6633'); grad.addColorStop(1,'#ffcb6600');
-  ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);
-  const halo = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthWrite:false,opacity:.15,blending:THREE.AdditiveBlending}));
-  halo.scale.setScalar(1.6);group.add(halo);
-  group.userData.halo = halo;
-  group.userData.star = star;
-  group.userData.light = light;
+  const ctx = cv.getContext('2d'), grad = ctx.createRadialGradient(64, 64, 2, 64, 64, 64);
+  grad.addColorStop(0, '#fff0c2aa'); grad.addColorStop(.25, '#ffcb6633'); grad.addColorStop(1, '#ffcb6600');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: .15, blending: THREE.AdditiveBlending }));
+  halo.scale.setScalar(1.6); group.add(halo);
+  group.userData = { halo, star, light, bow, bowTails, note, tagPivot, hang, tag };
   return group;
 }
 
@@ -85,11 +139,10 @@ function makeTextPlate(text, w, h, bg, fg) {
   roundRect(ctx, 0, 0, w, h, 18);
   ctx.fill();
   ctx.fillStyle = fg;
-  const fontSize = Math.floor(h * 0.24);
+  const fontSize = Math.floor(h * 0.26);
   ctx.font = `500 ${fontSize}px "Songti SC", "Noto Serif SC", serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // 简单换行：最多 3 行，放不下才省略
   const maxChars = Math.max(4, Math.floor((w - 28) / fontSize));
   const lines = [];
   let rest = text;
@@ -104,11 +157,10 @@ function makeTextPlate(text, w, h, bg, fg) {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  const mesh = new THREE.Mesh(
+  return new THREE.Mesh(
     new THREE.PlaneGeometry(0.34, 0.34 * (h / w)),
     new THREE.MeshBasicMaterial({ map: tex, transparent: true }),
   );
-  return mesh;
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -116,12 +168,11 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
   ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
+  ctx.arcTo(x + w, y + h, x, y, r);
+  ctx.arcTo(x + w, y, x + r, y, r);
   ctx.closePath();
 }
 
-// —— 人物：蓝大衣 + 莓红围巾，冬夜剪影感 ——
 export function buildMittens() {
   const group = new THREE.Group();
   const wool = mat(0x444458, { flatShading: false });
@@ -132,15 +183,10 @@ export function buildMittens() {
     const wrist = new THREE.Group();
     wrist.position.set(side * .145, -.115, .045);
     wrist.rotation.z = side * .34;
-    const palm = new THREE.Mesh(ellipsoid, wool);
-    palm.scale.set(.068, .105, .053);
-    const thumb = new THREE.Mesh(ellipsoid, wool);
-    thumb.position.set(-side * .052, .024, -.018);
-    thumb.scale.set(.03, .061, .031);
-    const trim = new THREE.Mesh(new THREE.CylinderGeometry(.067, .070, .055, 10), cuff);
-    trim.position.y = -.095;
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.064, .093, .28, 10), sleeve);
-    arm.position.y = -.245;
+    const palm = new THREE.Mesh(ellipsoid, wool); palm.scale.set(.068, .105, .053);
+    const thumb = new THREE.Mesh(ellipsoid, wool); thumb.position.set(-side * .052, .024, -.018); thumb.scale.set(.03, .061, .031);
+    const trim = new THREE.Mesh(new THREE.CylinderGeometry(.067, .070, .055, 10), cuff); trim.position.y = -.095;
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.064, .093, .28, 10), sleeve); arm.position.y = -.245;
     wrist.add(arm, trim, palm, thumb);
     group.add(wrist);
   }
@@ -150,54 +196,52 @@ export function buildMittens() {
 
 export function buildFox() {
   const g = new THREE.Group();
-  const rust = mat(0xe28c4e, {flatShading:false, emissive:0x673616, emissiveIntensity:.12});
-  const cream = mat(0xffebce, {flatShading:false});
+  const rust = mat(0xe28c4e, { flatShading: false, emissive: 0x673616, emissiveIntensity: .12 });
+  const cream = mat(0xffebce, { flatShading: false });
   const dark = mat(0x5a3a28);
 
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), rust);
-  body.scale.set(1.22,0.70,0.65);
+  const bodyGeo = paintGradient(new THREE.SphereGeometry(0.24, 12, 10), 0xffebce, 0xd9743a, 'y', -.24, .20);
+  const bodyMat = mat(0xffffff, { flatShading: false, vertexColors: true, emissive: 0x673616, emissiveIntensity: .10 });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.scale.set(1.22, 0.70, 0.65);
   body.position.y = 0.3;
   body.castShadow = true;
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(.13,8,6), cream);
-  chest.scale.set(.6,1,.88);chest.position.set(0.2, 0.3, 0);
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(.13, 8, 6), cream);
+  chest.scale.set(.6, 1, .88); chest.position.set(0.2, 0.3, 0);
 
-  const collar = new THREE.Mesh(
-    new THREE.TorusGeometry(.135, .026, 6, 14),
-    mat(PALETTE.berry),
-  );
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(.135, .026, 6, 14), mat(PALETTE.berry));
   collar.rotation.y = Math.PI / 2;
-  collar.position.set(.15, .38, 0);
-  const bell = new THREE.Mesh(new THREE.SphereGeometry(.032, 7, 5), mat(0xd7b36c));
+  const bell = new THREE.Mesh(new THREE.SphereGeometry(.032, 7, 5), mat(0xd7b36c, { emissive: 0x6b5320, emissiveIntensity: .2 }));
   bell.position.set(.11, .245, 0);
 
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.167, 12, 8), rust);
-  head.scale.set(1.02, .99, 1.17);
   headPivot.scale.setScalar(1.15);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.167, 14, 10), rust);
+  head.scale.set(1.02, .99, 1.17);
   head.castShadow = true;
   const snout = new THREE.Mesh(new THREE.SphereGeometry(.097, 14, 10), cream);
-  snout.scale.set(.62, 1.04, 1.32);
-  snout.rotation.z=-Math.PI/2;
-  snout.position.set(0.135, -0.044, 0);
+  snout.scale.set(.62, 1.04, 1.32); snout.rotation.z = -Math.PI / 2; snout.position.set(0.135, -0.044, 0);
   const nose = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), mat(0x2d2430));
   nose.position.set(.225, -.023, 0);
   const earL = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.18, 4), rust);
   const earR = earL.clone();
   earL.position.set(-0.03, 0.16, -0.085);
   earR.position.set(-0.03, 0.16, 0.085);
-  for (const side of [-1,1]) {
+  const eyes = [], shines = [], ears = [earL, earR];
+  for (const side of [-1, 1]) {
     const lining = new THREE.Mesh(new THREE.ConeGeometry(.046, .127, 3), mat(0xe4a098));
     lining.position.set(.013, .176, side * .081);
     headPivot.add(lining);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(.025,12,8),mat(0x202b36));
-    eye.scale.set(.90,1.10,.83); eye.position.set(.128,.035,side*.117); headPivot.add(eye);
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(.006,6,4),mat(0xffffff));
-    shine.position.set(.145,.046,side*.127);headPivot.add(shine);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(.025, 12, 8), mat(0x202b36));
+    eye.scale.set(.90, 1.10, .83); eye.position.set(.128, .035, side * .117);
+    headPivot.add(eye); eyes.push(eye);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(.006, 6, 4), mat(0xffffff));
+    shine.position.set(.145, .046, side * .127);
+    headPivot.add(shine); shines.push(shine);
   }
   headPivot.add(head, snout, nose, earL, earR);
 
-  // A small puff burst makes the nose-snow gag legible even in a still frame.
   const snowPuffs = [];
   const puffGeo = new THREE.SphereGeometry(.045, 7, 5);
   const puffMat = mat(0xf8fbff, { roughness: 1 });
@@ -206,13 +250,12 @@ export function buildFox() {
     puff.visible = false;
     puff.userData.angle = (i / 8) * Math.PI * 2;
     puff.userData.lift = .028 + (i % 3) * .018;
-    g.add(puff);
-    snowPuffs.push(puff);
+    g.add(puff); snowPuffs.push(puff);
   }
 
   const tailPivot = new THREE.Group();
   tailPivot.position.set(-0.24, 0.34, 0);
-  const tail = new THREE.Mesh(new THREE.SphereGeometry(.18,8,6), rust);
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(.18, 10, 8), rust);
   tail.scale.set(1.75,.92,.89);tail.position.x = -0.20;
   const tailTip = new THREE.Mesh(new THREE.SphereGeometry(.115,8,6), cream);
   tailTip.scale.set(1.33,1.08,1.06);tailTip.position.x = -0.43;
@@ -222,31 +265,42 @@ export function buildFox() {
 
   const legs = [];
   for (const [lx, lz] of [[0.16, -0.08], [0.16, 0.08], [-0.16, -0.08], [-0.16, 0.08]]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.06), dark);
-    leg.geometry.translate(0, -0.09, 0);
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(.03, .16, 3, 6), dark);
+    leg.geometry.translate(0, -.11, 0);
     leg.position.set(lx, 0.22, lz);
-    legs.push(leg);
-    g.add(leg);
+    legs.push(leg); g.add(leg);
   }
   collar.position.y = .31;
   g.add(body, chest, collar, bell, headPivot, tailPivot);
   return {
     group: g,
-    parts: { body, headPivot, tailPivot, legs, snowPuffs },
-    // gait：步频相位；moving 0~1；sitting：坐下姿态权重
+    parts: { body, headPivot, tailPivot, legs, snowPuffs, eyes, shines, ears, bell },
     pose(phase, moving, sitting, t) {
-      const swing = 0.7 * moving;
-      legs[0].rotation.z = Math.sin(phase) * swing;
-      legs[1].rotation.z = Math.sin(phase + Math.PI) * swing;
-      legs[2].rotation.z = Math.sin(phase + Math.PI) * swing;
-      legs[3].rotation.z = Math.sin(phase) * swing;
-      body.position.y = 0.3 + Math.abs(Math.sin(phase)) * 0.03 * moving - sitting * 0.1;
-      body.rotation.z = sitting * 0.35;
-      headPivot.position.y = 0.42 - sitting * 0.04 + Math.sin(t * 1.8) * 0.006;
-      headPivot.rotation.z = sitting * 0.15;
+      const offsets = [0, Math.PI, Math.PI * .82, Math.PI * 1.82];
+      for (let i = 0; i < legs.length; i++) {
+        const cycle = phase + offsets[i];
+        const front = i < 2;
+        legs[i].rotation.z = Math.sin(cycle) * .50 * moving + sitting * (front ? .48 : -.66);
+        legs[i].position.y = .22 - sitting * (front ? .02 : .06) +
+          Math.max(0, Math.cos(cycle)) * .042 * moving;
+      }
+      const bob = (1 - Math.cos(phase * 2)) * .007 * moving;
+      body.position.y = .3 + bob - sitting * .09;
+      body.rotation.z = sitting * .19;
+      chest.position.y = .3 + bob - sitting * .04;
+      collar.position.y = .31 + bob - sitting * .04;
+      bell.position.y = .245 + bob - sitting * .04;
+      headPivot.position.y = .42 + bob * .4 - sitting * .02 + Math.sin(t * 1.8) * .006;
+      headPivot.rotation.z = sitting * 0.12;
       headPivot.rotation.y = 0;
       tailPivot.rotation.z = -.18 - sitting * .25;
-      tailPivot.rotation.y = Math.sin(t * (moving > 0.1 ? 6 : 2.2)) * (moving > 0.1 ? 0.25 : 0.12);
+      tailPivot.rotation.y = Math.sin(t * 2.2) * .12 * (1 - moving) + Math.sin(phase) * .17 * moving;
+      const bp = (t * 0.9 + 0.37) % 3.4;
+      const blink = bp < 0.12 ? 0.12 : 1;
+      for (const eye of eyes) eye.scale.set(.90, 1.10 * blink, .83);
+      for (const sh of shines) sh.visible = blink > 0.5;
+      const twitch = Math.sin(t * 0.7) > 0.985 ? Math.sin(t * 40) * .18 : 0;
+      earL.rotation.x = twitch; earR.rotation.x = -twitch * .7;
     },
   };
 }

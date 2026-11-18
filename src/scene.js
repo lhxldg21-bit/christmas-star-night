@@ -8,6 +8,11 @@ import { buildMittens, buildFox, buildStar } from './characters.js';
 import { AudioEngine } from './audio.js';
 import { UI } from './ui.js';
 import { Story } from './story.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 window.__SCENE_READY__ = false;
 window.__SCENE_ERROR__ = null;
@@ -66,7 +71,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(PALETTE.nightTop);
 scene.fog = new THREE.Fog(SKY, 10, 66);
 
-const camera = new THREE.PerspectiveCamera(VIEW_WIDTH < VIEW_HEIGHT ? 63 : 49, VIEW_WIDTH / VIEW_HEIGHT, 0.07, 420);
+function fovFor(aspect) { return 63 + (49 - 63) * THREE.MathUtils.clamp((aspect - 0.45) / 0.55, 0, 1); }
+const camera = new THREE.PerspectiveCamera(fovFor(VIEW_WIDTH / VIEW_HEIGHT), VIEW_WIDTH / VIEW_HEIGHT, 0.07, 420);
 
 // —— 灯光：冷月为主，琥珀点光为辅 ——
 scene.add(new THREE.HemisphereLight(0xa3a6df, 0x777096, 0.66));
@@ -88,6 +94,40 @@ scene.add(moonLight);
 const fill = new THREE.DirectionalLight(0xa1abeb, 0.34);
 fill.position.set(12, 8, -16);
 scene.add(fill);
+
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null }, uTime: { value: 0 },
+    uVignette: { value: 0.18 }, uGrain: { value: 0.028 },
+    uShadow: { value: new THREE.Vector3(0.93, 0.96, 1.06) },
+    uHighlight: { value: new THREE.Vector3(1.05, 1.0, 0.94) },
+  },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: [
+    'uniform sampler2D tDiffuse; uniform float uTime,uVignette,uGrain;',
+    'uniform vec3 uShadow,uHighlight; varying vec2 vUv;',
+    'float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }',
+    'void main(){',
+    '  vec4 c = texture2D(tDiffuse, vUv);',
+    '  float l = dot(c.rgb, vec3(0.2126,0.7152,0.0722));',
+    '  c.rgb *= mix(uShadow, uHighlight, smoothstep(0.25, 0.85, l));',
+    '  vec2 d = vUv - 0.5;',
+    '  c.rgb *= mix(1.0, smoothstep(0.9, 0.3, length(d)), uVignette);',
+    '  c.rgb += (hash(vUv * vec2(1920.0,1080.0) + fract(uTime) * 7.0) - 0.5) * uGrain;',
+    '  gl_FragColor = c;',
+    '}',
+  ].join('\n'),
+};
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(renderer.getPixelRatio());
+composer.setSize(VIEW_WIDTH, VIEW_HEIGHT);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(VIEW_WIDTH, VIEW_HEIGHT), 0.42, 0.55, 0.50);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+const gradePass = new ShaderPass(GradeShader);
+composer.addPass(gradePass);
+renderer.info.autoReset = false;
 
 // —— 世界与角色 ——
 const world = buildWorld(scene, rand);
@@ -111,18 +151,29 @@ const ui = new UI({
 story.ui = ui;
 story.reset();
 
-// 点按前进，拖动检视星星或在停步时看向两侧。
+// 按住即走、松开即停；走路时也能拖拽转头；点星星本体可拾取，点狐狸有反应。
 const surface = renderer.domElement;
 surface.style.touchAction = 'none';
 let pointer = null;
 const clamp = THREE.MathUtils.clamp;
 const rad = THREE.MathUtils.degToRad;
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+function pickAt(clientX, clientY) {
+  const rect = surface.getBoundingClientRect();
+  ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  if (raycaster.intersectObject(star, true).length) return 'star';
+  if (raycaster.intersectObject(fox.group, true).length) return 'fox';
+  return null;
+}
 surface.addEventListener('pointerdown', (event) => {
   if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect'].includes(story.state)) return;
-  if (story.state === 'walk' && story.p.target) return;
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, dragged: false,
-    mode: story.state, yaw: story.look.yaw, pitch: story.look.pitch,
+    mode: story.state, t: performance.now(), yaw: story.look.yaw, pitch: story.look.pitch,
     starYaw: story.inspect.yaw, starPitch: story.inspect.pitch };
+  if (story.state === 'walk') story.holdWalk = true;
+  story.lookActive = true;
   surface.setPointerCapture(event.pointerId);
 });
 surface.addEventListener('pointermove', (event) => {
@@ -130,20 +181,29 @@ surface.addEventListener('pointermove', (event) => {
   const x = event.clientX - pointer.x, y = event.clientY - pointer.y;
   if (Math.hypot(x, y) < 8 && !pointer.dragged) return;
   pointer.dragged = true;
+  story.holdWalk = false;
   if (pointer.mode === 'inspect') {
     story.inspect.yaw = pointer.starYaw + x * .012;
     story.inspect.pitch = clamp(pointer.starPitch + y * .008, -.9, .9);
   } else {
-    story.look.yaw = clamp(pointer.yaw + x * .0045, -rad(25), rad(25));
-    story.look.pitch = clamp(pointer.pitch + y * .004, -rad(15), rad(10));
+    story.look.yaw = clamp(pointer.yaw + x * .0045, -rad(60), rad(60));
+    story.look.pitch = clamp(pointer.pitch + y * .004, -rad(25), rad(20));
   }
 });
 surface.addEventListener('pointerup', (event) => {
   if (pointer?.id !== event.pointerId) return;
-  if (!pointer.dragged && pointer.mode === 'walk' && story.state === 'walk') story.queueIntent({ type: 'advance' });
+  story.holdWalk = false;
+  story.lookActive = false;
+  const quick = !pointer.dragged && (performance.now() - pointer.t < 200);
+  if (quick && pointer.mode === 'walk' && story.state === 'walk') {
+    const hit = pickAt(event.clientX, event.clientY);
+    if (hit === 'star') story.queueIntent({ type: 'pickup' });
+    else if (hit === 'fox') story.queueIntent({ type: 'foxTap' });
+    else story.queueIntent({ type: 'advance' });
+  }
   pointer = null;
 });
-surface.addEventListener('lostpointercapture', () => { pointer = null; });
+surface.addEventListener('lostpointercapture', () => { pointer = null; story.holdWalk = false; story.lookActive = false; });
 
 // —— 主循环：固定步长推进故事，雪是时间的解析函数 ——
 const hud = document.getElementById('hud');
@@ -161,10 +221,21 @@ function simulate(t) {
   }
   if (steps === 0) story.applyCamera(camera, STEP); // t=0 也要落好初始机位
   world.snow.update(t, camera.position.x, camera.position.z);
+  world.sparkle.update(t);
 }
 
 function draw() {
-  renderer.render(scene, camera);
+  const pb = story.pullbackT;
+  const fk = pb >= 0 ? (story.reducedMotion ? 1 : THREE.MathUtils.smoothstep(pb, 0, 4.8)) : 0;
+  scene.fog.near = 10 + 12 * fk;
+  scene.fog.far = 66 + 44 * fk;
+  for (const material of world.ridgeMaterials) material.opacity = 1 - fk;
+  const lighting = THREE.MathUtils.smoothstep(story.awakenT, .45, 3.6);
+  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, lighting);
+  renderer.toneMappingExposure = 1.05 + 0.08 * fk;
+  gradePass.uniforms.uTime.value = storyClock;
+  renderer.info.reset();
+  composer.render();
   document.body.dataset.stage = story.state;
   document.body.dataset.fox = story.f.mode;
   document.body.dataset.gag = story.f.gagT.toFixed(2);
@@ -187,6 +258,7 @@ function animate() {
     story.applyCamera(camera, STEP);
   }
   world.snow.update(storyClock, camera.position.x, camera.position.z);
+  world.sparkle.update(storyClock);
   draw();
 }
 
@@ -228,9 +300,10 @@ window.__restore = () => {
 addEventListener('resize', () => {
   if (FIXED_CAPTURE_VIEWPORT) return;
   camera.aspect = innerWidth / innerHeight;
-  camera.fov = innerWidth < innerHeight ? 63 : 49;
+  camera.fov = fovFor(camera.aspect);
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
   if (paused) {
     window.__SCENE_READY__ = false;
     draw();
@@ -243,6 +316,7 @@ async function startScene() {
   else {
     story.applyCamera(camera, 0);
     world.snow.update(0, camera.position.x, camera.position.z);
+    world.sparkle.update(0);
     draw();
     window.__SCENE_READY__ = true;
     renderer.setAnimationLoop(animate);
