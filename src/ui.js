@@ -48,6 +48,9 @@ export class UI {
     this.prompt = this._el('button', 'prompt hide');
     this.wishHint = this._el('div', 'wish-hint hide', null, '可按住许愿，松开放上星星');
     this.wishHint.id = 'wish-hint';
+    this.wishMeter = this._el('div', 'wish-meter hide');
+    this.wishMeter.setAttribute('aria-hidden', 'true');
+    this.wishFill = this._el('div', 'wish-fill', this.wishMeter);
     this.prompt.addEventListener('pointerdown', (event) => {
       if (event.button === 0 && this._cache.prompt === '安放星星') {
         this.onIntent({ type: 'wish', active: true });
@@ -60,6 +63,7 @@ export class UI {
     this.prompt.addEventListener('click', () => {
       const label = this.prompt.textContent;
       if (label === '拾起星星') this.onIntent({ type: 'pickup' });
+      else if (label === '请狐狸点灯') this.onIntent({ type: 'light-lantern' });
       else if (label === '安放星星') this.onIntent({ type: 'place' });
     });
   }
@@ -73,7 +77,7 @@ export class UI {
     const row = this._el('div', 'inspect-actions', this.inspectPanel);
     this.flipBtn = this._el('button', 'btn-primary small', row, '翻面看看');
     this.flipBtn.addEventListener('click', () => this.onIntent({ type: 'flip' }));
-    this.goBtn = this._el('button', 'btn-ghost', row, '洒一点星光');
+    this.goBtn = this._el('button', 'btn-ghost', row, '提着星星继续走');
     this.goBtn.addEventListener('click', () => this.onIntent({ type: 'continue' }));
     this.inspectHint = this._el('div', 'inspect-hint', this.inspectPanel, '背面好像还有一行字');
   }
@@ -121,10 +125,18 @@ export class UI {
     }
     const body = this._el('div', 'letter-body', paper);
     body.textContent = this.config.letter;
+    const replies = this._el('div', 'reply-row letter-replies', paper);
+    for (const [kind, text] of [['yes', '愿意'], ['think', '让我想想']]) {
+      const choice = this._el('button', 'btn-ghost', replies, text);
+      choice.addEventListener('click', () => {
+        this.letter.classList.add('hide');
+        this.onIntent({type: 'reply', kind});
+      });
+    }
     const close = this._el('button', 'btn-primary small', paper, '收好这封信');
     close.addEventListener('click', () => {
       this.letter.classList.add('hide');
-      this._showReply();
+      this._showEnd();
     });
   }
 
@@ -140,20 +152,12 @@ export class UI {
     again.addEventListener('click', () => location.reload());
   }
 
-  _showReply() {
-    if (this.reply) { this.reply.classList.remove('hide'); return; }
-    this.reply = this._el('div', 'reply');
-    const box = this._el('div', 'reply-box', this.reply);
-    this._el('div', 'reply-q', box, `这个圣诞，愿意和我${esc(this.config.activity)}吗？`);
-    const row = this._el('div', 'reply-row', box);
-    const yes = this._el('button', 'btn-primary', row, '愿意');
-    const think = this._el('button', 'btn-ghost', row, '让我想想');
-    yes.addEventListener('click', () => this.onIntent({ type: 'reply', kind: 'yes' }));
-    think.addEventListener('click', () => this.onIntent({ type: 'reply', kind: 'think' }));
-  }
-
   showReply(kind, config) {
-    if (!this.reply) return;
+    if (!this.reply) {
+      this.reply = this._el('div', 'reply');
+      this._el('div', 'reply-box', this.reply);
+    }
+    this.reply.classList.remove('hide');
     const box = this.reply.querySelector('.reply-box');
     box.innerHTML = '';
     if (kind === 'yes') {
@@ -256,6 +260,11 @@ export class UI {
     this._toggle(this.inspectPanel, active);
   }
 
+  setWishCharge(active, amount) {
+    this._toggle(this.wishMeter, active);
+    if (active) this.wishFill.style.transform = `scaleX(${amount})`;
+  }
+
   setJourney(active, text) {
     if (!this.journey) return;
     if (text && this.journey.textContent !== text) this.journey.textContent = text;
@@ -272,8 +281,8 @@ export class UI {
   setToast(text) {
     const show = !!text;
     const cur = !this.toastEl.classList.contains('hide');
+    if (show && this.toastEl.textContent !== text) this.toastEl.textContent = text;
     if (cur === show) return;
-    if (show) this.toastEl.textContent = text;
     this.toastEl.classList.toggle('hide', !show);
   }
 
@@ -282,6 +291,7 @@ export class UI {
     this.toastEl.classList.add('hide');
     clearTimeout(this._toastTimer);
     this.setPrompt(null);
+    this.setWishCharge(false, 0);
     this.setInspect(false);
     if (this.end) this.end.classList.add('hide');
     if (this.nameKicker) this.nameKicker.classList.add('hide');

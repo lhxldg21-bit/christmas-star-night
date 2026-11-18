@@ -133,20 +133,19 @@ export function buildWorld(scene, rand) {
   const trailGeo=new THREE.BufferGeometry();trailGeo.setAttribute('position',new THREE.Float32BufferAttribute(trailVertices,3));trailGeo.setAttribute('color',new THREE.Float32BufferAttribute(trailColors,4));trailGeo.setIndex(trailIndices);trailGeo.computeVertexNormals();
   const trail=new THREE.Mesh(trailGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,transparent:true,depthWrite:false,side:THREE.DoubleSide}));trail.receiveShadow=true;scene.add(trail);
 
-  const patchShape = new THREE.Shape();
-  for (let i = 0; i < 10; i++) {
-    const a = i * Math.PI / 5 + Math.PI / 2;
-    const radius = i % 2 === 0 ? .42 : .18;
-    patchShape[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(a) * radius, Math.sin(a) * radius);
-  }
-  patchShape.closePath();
-  world.starPatch = new THREE.Mesh(new THREE.ShapeGeometry(patchShape), new THREE.MeshBasicMaterial({
-    color: 0xffc36c, transparent: true, opacity: .76, depthWrite: false,
-    blending: THREE.AdditiveBlending, toneMapped: false,
+  const beamGeo = new THREE.PlaneGeometry(2.4, 1.65, 10, 8);
+  beamGeo.rotateX(-Math.PI / 2);
+  world.starPatch = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({
+    map: makeGlowTexture('#ffcf90cc', '#ffbd6b00'),
+    transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
   }));
-  world.starPatch.rotation.x = -Math.PI / 2;
   world.starPatch.visible = false;
   scene.add(world.starPatch);
+  const entrance = path.curve.getPointAt(.065);
+  entrance.x -= .33;
+  entrance.z -= 1.06;
+  entrance.y = heightAt(entrance.x, entrance.z);
+  makeLowLantern(scene, entrance).setGlow(.65);
   buildSky(scene, world, rand);
   buildPines(scene, world, rand, heightAt, path);
   buildSnowDrifts(scene, rand, heightAt, path);
@@ -263,7 +262,7 @@ function buildPines(scene, world, rand, heightAt, path) {
   const foliGeo = mergeGeos(tiers);
 
   const placements = [
-    {x:-8.5,z:10,s:2.2,rot:0.3},{x:4.8,z:8,s:2.9,rot:1.2},
+    {x:-10.8,z:8,s:1.8,rot:0.3},{x:6.5,z:6,s:2.0,rot:1.2},
     {x:-9,z:0,s:3.1,rot:0.4},{x:3.6,z:-1,s:2.0,rot:0.6},
     {x:-7,z:-12,s:2.8,rot:0.9},{x:7.5,z:-12,s:3.3,rot:0.2},
     {x:-4.5,z:-22,s:2.8,rot:0.5},{x:8,z:-25,s:3.5,rot:0.8},
@@ -272,7 +271,7 @@ function buildPines(scene, world, rand, heightAt, path) {
   ];
   // Hero pines create successive "gates" without closing the walk corridor.
   for (const [t, side, s, tilt] of [
-    [.14, -1, 1.45, .12], [.29, 1, 1.8, -.08],
+    [.19, -1, 1.22, .12], [.29, 1, 1.8, -.08],
     [.48, -1, 1.55, .16], [.66, 1, 1.75, -.12],
     [.82, -1, 1.9, .08],
   ]) {
@@ -293,7 +292,7 @@ function buildPines(scene, world, rand, heightAt, path) {
       const dd = (p.x - x) ** 2 + (p.z - z) ** 2;
       if (dd < dp) dp = dd;
     }
-    if (Math.sqrt(dp) < 3.4) continue; // 让开路径
+    if (Math.sqrt(dp) < (z > 0 ? 5.0 : 3.4)) continue; // 让开路径
     if (Math.abs(x) < 5 && z < -9 && z > -22) continue; // 让开小院
     placements.push({ x, z, s: 0.8 + rand() * 1.6, rot: rand() * Math.PI * 2 });
   }
@@ -363,7 +362,7 @@ function buildSnowDrifts(scene, rand, heightAt, path) {
       const dd = (p.x - x) ** 2 + (p.z - z) ** 2;
       if (dd < dp) dp = dd;
     }
-    if (Math.sqrt(dp) < 2.2) continue;
+    if (Math.sqrt(dp) < 2.2 || (z > 2 && Math.abs(x + 3) < 6)) continue;
     const y = heightAt(x, z);
     q.setFromAxisAngle(up, rand() * Math.PI * 2);
     if (di < 26 && rand() < 0.75) {
@@ -429,7 +428,6 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
     }
   };
 
-  branchAt(.075, -1, 1.15);
   branchAt(.72, 1, .78);
 
   // Irregular snow shoulders keep the road readable from a low tracking camera.
@@ -440,7 +438,7 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
   const s = new THREE.Vector3();
   let n = 0;
   for (let i = 0; i < 15; i++) {
-    const t = .045 + i * .064;
+    const t = .17 + i * .055;
     const p = path.curve.getPointAt(Math.min(t, .98));
     const tangent = path.curve.getTangentAt(Math.min(t, .98)).normalize();
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
@@ -478,9 +476,12 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
   detail.add(log);
 
   // 一层矮软雪接住追光的小狐狸，保留眼高视线。
-  const glintBank = path.curve.getPointAt(.12);
+  const glintBank = path.curve.getPointAt(.21);
+  const bend = path.curve.getTangentAt(.21);
+  glintBank.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.02);
+  world.playSnow = glintBank;
   const bank = new THREE.Mesh(bankGeo, mat(PALETTE.snow, { flatShading: false }));
-  bank.position.set(glintBank.x + 1.24, heightAt(glintBank.x + 1.24, glintBank.z), glintBank.z);
+  bank.position.set(glintBank.x, heightAt(glintBank.x, glintBank.z), glintBank.z);
   bank.scale.set(.9, .15, .75);
   bank.receiveShadow = true;
   detail.add(bank);
@@ -490,7 +491,7 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
   const berries = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.047, 0), mat(0xb24d5a), 60);
   const up = new THREE.Vector3(0, 1, 0), stem = new THREE.Vector3(), center = new THREE.Vector3();
   for (let i = 0; i < 10; i++) {
-    const t = .035 + .10 * i, tangent = path.curve.getTangentAt(t);
+    const t = .24 + .072 * i, tangent = path.curve.getTangentAt(t);
     const p = path.curve.getPointAt(t).addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), (1.65 + rand() * .35) * (i % 2 ? -1 : 1));
     p.y = heightAt(p.x, p.z) + .02;
     for (let j = 0; j < 2; j++) {
@@ -521,7 +522,7 @@ function buildLamps(scene, world, path, heightAt) {
   const poolTex = makeGlowTexture('#ffae60b8', '#ffa14a00');
 
   for (let i = 0; i < 6; i++) {
-    const t = 0.18 + i * 0.145;
+    const t = 0.26 + i * 0.137;
     const p = path.curve.getPointAt(Math.min(t, 0.97));
     const tangent = path.curve.getTangentAt(Math.min(t, 0.97));
     const side = new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(i % 2 === 0 ? 2.7 : -2.15);
@@ -566,12 +567,46 @@ function buildLamps(scene, world, path, heightAt) {
   }
 }
 
+function makeLowLantern(scene, position) {
+  const group = new THREE.Group();
+  group.position.copy(position);
+  const metal = mat(0x4f3a4a);
+  const glass = mat(0xffce8e, { emissive: 0xffaf56, emissiveIntensity: 0 });
+  const bulb = new THREE.Mesh(new THREE.BoxGeometry(.27, .25, .27), glass);
+  bulb.position.y = .36;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(.09, .22, .14, 4), metal);
+  cap.position.y = .55;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(.32, .22, .32), metal);
+  base.position.y = .11;
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeGlowTexture('#ffc7759c', '#ffb45e00'), transparent: true, depthWrite: false,
+  }));
+  halo.position.copy(bulb.position);
+  halo.scale.setScalar(1.2);
+  const glow = new THREE.PointLight(0xffbb73, 0, 2.6, 2);
+  glow.position.copy(bulb.position);
+  group.add(base, bulb, cap, halo, glow);
+  scene.add(group);
+  return {
+    bulb,
+    position: position.clone().add(bulb.position),
+    setGlow(amount) {
+      glass.emissiveIntensity = .04 + amount * 2.3;
+      halo.material.opacity = amount * .66;
+      glow.intensity = amount * .72;
+    },
+  };
+}
+
 // —— 小院：石墙弧、底座、远处暖窗小屋剪影、两棵近景松 ——
 function buildCourtyard(scene, world, heightAt) {
   const g = new THREE.Group();
   const wallMat = mat(0xaab3be);
   const wallGeo = new THREE.BoxGeometry(1.32, 0.58, 0.42);
   const cx = 0.2, cz = -28.2;
+  const lowLight = new THREE.Vector3(cx + 1.48, heightAt(cx + 1.48, cz + 1.05), cz + 1.05);
+  world.courtyardLantern = makeLowLantern(g, lowLight);
+  world.lanternFox = lowLight.clone().add(new THREE.Vector3(.53, 0, .05));
   for (let i = 0; i < 12; i++) {
     const a = Math.PI * (0.10 + (i / 11) * 0.80); // 朝北半弧，开口向南（来路）
     const x = cx + Math.cos(a) * 4.75;

@@ -240,7 +240,11 @@ export function buildFox() {
     shine.position.set(.145, .046, side * .127);
     headPivot.add(shine); shines.push(shine);
   }
-  headPivot.add(head, snout, nose, earL, earR);
+  const noseSnow = new THREE.Mesh(new THREE.IcosahedronGeometry(.035, 0), mat(0xf4f4f9));
+  noseSnow.position.set(.208, .008, .018);
+  noseSnow.scale.set(1.1, .65, 1);
+  noseSnow.visible = false;
+  headPivot.add(head, snout, nose, earL, earR, noseSnow);
 
   const snowPuffs = [];
   const puffGeo = new THREE.SphereGeometry(.045, 7, 5);
@@ -274,7 +278,7 @@ export function buildFox() {
   g.add(body, chest, collar, bell, headPivot, tailPivot);
   return {
     group: g,
-    parts: { body, headPivot, tailPivot, legs, snowPuffs, eyes, shines, ears, bell },
+    parts: { body, headPivot, tailPivot, legs, snowPuffs, noseSnow, eyes, shines, ears, bell },
     pose(phase, moving, sitting, t) {
       const offsets = [0, Math.PI, Math.PI * .82, Math.PI * 1.82];
       for (let i = 0; i < legs.length; i++) {

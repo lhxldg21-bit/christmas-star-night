@@ -76,7 +76,12 @@ export class Story {
     this.look = { yaw: 0, pitch: 0 };
     this.route = [];
     this.world.starPatch.visible = false;
+    this.world.starPatch.position.copy(w.path.curve.getPointAt(.12));
     this.world.setChristmasLights(0);
+    this.world.courtyardLantern.setGlow(0);
+    this.lanternT = -1;
+    this.playedInSnow = false;
+    this.bendReunion = false;
     this.reducedMotion = !this.auto && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.starState = 'ground';
     this.prints.clear();
@@ -112,6 +117,7 @@ export class Story {
       sitting: 1,
       gagT: -1,
       recoveryT: 0,
+      companionT: 0,
       offerT: -1,
       offered: false,
     };
@@ -133,6 +139,7 @@ export class Story {
 
     this.camPos = new THREE.Vector3();
     this.camLook = new THREE.Vector3();
+    this.carryForward = new THREE.Vector3(0, 0, -1);
     this.camInit = false;
     this.pullbackT = -1;
     this.placeT = -1;
@@ -148,7 +155,6 @@ export class Story {
     this.wishGlow = 0;
     this.lookActive = false;
     this.foxReactT = -1;
-    this.stealT = -1;
     this.nameKickerT = -1;
     this.replyT = -1;
     this.replyKind = null;
@@ -204,6 +210,16 @@ export class Story {
       this.look.pitch *= Math.exp(-3 * dt);
     }
     this._updatePlayer(dt);
+    if (!this.playedInSnow && this.state === 'walk' && this.starState === 'carried' &&
+        this._progress(this.p.pos) >= .165) {
+      this.playedInSnow = true;
+      this.state = 'gag';
+      this.f.mode = 'chase';
+      this.f.gagT = 0;
+      this.jumpFrom = this.f.pos.clone();
+      this.lightOrigin = this.world.starPatch.position.clone();
+      this.lightEnd = this.world.playSnow;
+    }
     this._updateFox(dt);
     this._updateStar(dt);
     this._updateBeats(dt);
@@ -248,37 +264,40 @@ export class Story {
         if (this.state === 'inspect') { this.inspect.yaw += Math.PI; this.flippedOnce = true; this.audio.chime(); this._haptic(8); }
         break;
       case 'continue':
-        if (this.state === 'inspect' && !this.flippedOnce) {
-          this.stealT = 0; this.foxReactT = 0; this.flippedOnce = true;
-          this.inspect.yaw += Math.PI; this.audio.chime(); this._haptic(10);
-          break;
-        }
         if (this.state === 'inspect') {
-          this.state = 'gag';
+          this.state = 'walk';
           this.starState = 'carried';
-          this.f.mode = 'chase';
-          this.f.gagT = 0;
-          this.jumpFrom = this.f.pos.clone();
-          this.lightOrigin = this.world.starPatch.position.clone();
-          const forward = new THREE.Vector3(Math.sin(this.p.yaw), 0, Math.cos(this.p.yaw));
-          const side = new THREE.Vector3(-forward.z, 0, forward.x);
-          this.lightEnd = this.p.pos.clone().addScaledVector(forward, 3.55).addScaledVector(side, .82);
+          this.f.mode = 'lead';
           this.audio.setLayer(1);
         }
         break;
+      case 'light-lantern':
+        if (this.canLightLantern()) {
+          this.lanternT = 0;
+          this.f.mode = 'light-lantern';
+        }
+        break;
       case 'wish':
-        this.wishing = it.active;
+        this.wishing = it.active && this.canPlace();
         break;
       case 'place':
-        if (this.state === 'walk' && this.starState === 'carried' &&
-            this.p.pos.distanceTo(this.world.basePos) < 3.7) {
+        if (this.canPlace()) {
+          this.wishing = false;
           this.route.length = 0;
           this.state = 'approach-base';
           this.p.target = this.placeSpot.clone();
         }
         break;
       case 'foxTap':
-        if (this.foxReactT < 0) { this.foxReactT = 0; this.audio.chime(); this._haptic(6); }
+        if (this.canLightLantern()) {
+          this._handleIntent({ type: 'light-lantern' });
+        } else if (this.f.mode === 'waitAtBend') {
+          this._meetAtBend();
+        } else if (this.foxReactT < 0) {
+          this.foxReactT = 0;
+          this.audio.chime();
+          this._haptic(6);
+        }
         break;
       case 'reply':
         this.replyKind = it.kind; this.replyT = 0;
@@ -286,6 +305,22 @@ export class Story {
         if (this.ui) this.ui.showReply(it.kind, this.config);
         break;
     }
+  }
+
+  _atGate() {
+    return this.state === 'walk' && !this.p.target && this.starState === 'carried' &&
+      this.p.pos.distanceTo(this.world.basePos) < 3.7;
+  }
+
+  canLightLantern() { return this._atGate() && this.lanternT < 0; }
+
+  canPlace() { return this._atGate() && this.lanternT >= 1.4; }
+
+  _meetAtBend() {
+    this.bendReunion = true;
+    this.f.mode = 'returnAtBend';
+    this.f.companionT = 0;
+    this.audio.chime();
   }
 
   _haptic(ms) {
@@ -382,12 +417,18 @@ export class Story {
       const tangent = path.curve.getTangentAt(pr);
       target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.83));
       if (playerProgress > .89) f.mode = 'arrive';
+      if (!this.bendReunion && playerProgress > .38 && playerProgress < .55 &&
+          f.pos.distanceTo(target) < .72) {
+        f.mode = 'waitAtBend';
+        f.companionT = 0;
+        this.audio.chime();
+      }
       speed = 2.1;
       f.sitting = Math.max(0, f.sitting - dt * 6);
       const distToPlayer = f.pos.distanceTo(this.p.pos);
       // Stay visible as a guide. If the player pauses, wait ahead instead of
       // sprinting all the way back and making the scene feel stalled.
-      if (this.p.idleTime > .75 && distToPlayer > 1.55) {
+      if (f.mode === 'lead' && this.p.idleTime > .75 && distToPlayer > 1.55) {
         f.mode = 'waitAhead';
       }
     } else if (f.mode === 'waitAhead') {
@@ -395,12 +436,22 @@ export class Story {
       f.moving = Math.max(0, f.moving - dt * 6);
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
       if (this.p.target) f.mode = 'lead';
+    } else if (f.mode === 'waitAtBend') {
+      f.companionT += dt;
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
+      if (f.companionT > 1.85 || f.pos.distanceTo(this.p.pos) < 1.7) this._meetAtBend();
+    } else if (f.mode === 'returnAtBend') {
+      f.companionT += dt;
+      const progress = Math.min(.98, this._progress(this.p.pos) + .025);
+      target = path.curve.getPointAt(progress);
+      const tangent = path.curve.getTangentAt(progress);
+      target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), 1.15);
+      speed = 1.85;
+      if (f.companionT > 5) f.mode = 'lead';
     } else if (f.mode === 'chase') {
       f.gagT += dt;
       f.sitting = 0;
-      const sweep = THREE.MathUtils.smoothstep(f.gagT, .3, 1.4);
-      const patch = this.world.starPatch;
-      patch.position.copy(this.lightOrigin).lerp(this.lightEnd, sweep);
+
       const jump = THREE.MathUtils.smoothstep(f.gagT, .78, 1.72);
       f.pos.lerpVectors(this.jumpFrom, this.lightEnd, jump);
       f.yaw = dampAngle(f.yaw, Math.atan2(this.lightEnd.x - this.jumpFrom.x, this.lightEnd.z - this.jumpFrom.z), 5, dt);
@@ -414,7 +465,7 @@ export class Story {
       f.gagT += dt;
       f.moving = 0;
       f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 6, dt);
-      if (f.gagT >= 1.65) {
+      if (f.gagT >= 1.2) {
         f.mode = 'comeback';
         f.recoveryT = 0;
       }
@@ -432,11 +483,24 @@ export class Story {
         this.toastUntil = this.time + 1.8;
       }
     } else if (f.mode === 'arrive') {
-      const b = this.world.basePos;
-      target = new THREE.Vector3(b.x + 1.5, 0, b.z + 1.2);
+      target = this.world.lanternFox;
       speed = RUN;
       if (f.pos.distanceTo(target) < 0.3) {
         f.mode = 'arrive-sit';
+      }
+    } else if (f.mode === 'light-lantern') {
+      target = this.world.lanternFox;
+      f.sitting = Math.max(0, f.sitting - dt * 5);
+      speed = 2.4;
+      if (f.pos.distanceTo(target) < .2) {
+        const lamp = this.world.courtyardLantern.position;
+        f.yaw = dampAngle(f.yaw, Math.atan2(lamp.x - f.pos.x, lamp.z - f.pos.z), 8, dt);
+        target = null;
+        const before = this.lanternT;
+        this.lanternT += dt;
+        if (before < .66 && this.lanternT >= .66) this.audio.lampPing(1);
+        this.world.courtyardLantern.setGlow(THREE.MathUtils.smoothstep(this.lanternT, .66, 1.4));
+        if (this.lanternT >= 1.4) f.mode = 'arrive-sit';
       }
     } else if (f.mode === 'arrive-sit') {
       f.sitting = Math.min(1, f.sitting + dt * 4);
@@ -488,7 +552,10 @@ export class Story {
       g.position.y += Math.sin(Math.PI * this.foxReactT / 0.9) * .18;
       this.fox.parts.tailPivot.rotation.y = Math.sin(this.foxReactT * 30) * .4;
     }
-    if (f.mode === 'offer') {
+    if (f.mode === 'light-lantern') {
+      head.rotation.y = 0;
+      head.rotation.z = -.21 * Math.sin(Math.PI * THREE.MathUtils.smoothstep(this.lanternT, .12, 1.22));
+    } else if (f.mode === 'offer') {
       const dip = Math.sin(Math.PI * f.offerT / 1.1);
       head.position.y -= dip * .11;
       head.rotation.z -= dip * .25;
@@ -500,6 +567,8 @@ export class Story {
       g.position.y -= .09 * Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, 0, .66));
       this.fox.parts.tailPivot.rotation.y = Math.sin(f.gagT * 12) * .28;
     }
+    this.fox.parts.noseSnow.visible = (f.mode === 'peek' && f.gagT > .50) || f.mode === 'comeback' ||
+      (f.mode === 'lead' && this.toastUntil - this.time > .7);
     for (const puff of this.fox.parts.snowPuffs) {
       puff.visible = f.mode === 'peek' && f.gagT < .78;
       if (!puff.visible) continue;
@@ -518,40 +587,48 @@ export class Story {
       ud.bowTails[i].rotation.x = Math.sin(tt * 2.2 + i * 1.7) * .22;
     if (ud.tagPivot) ud.tagPivot.rotation.z = Math.sin(tt * 1.3) * .14;
     const targetScale = this.starState === 'carried'
-      ? (this.state === 'gag' ? .70 : .52)
-      : (['pickup', 'inspect'].includes(this.starState) ? .70 : 1.16);
+      ? .52
+      : (['pickup', 'inspect'].includes(this.starState) ? .70 : this.starState === 'ground' ? .94 : 1.16);
     const sc = s.scale.x + (targetScale - s.scale.x) * Math.min(1, 6 * dt);
     s.scale.setScalar(sc);
     const L = s.userData.light;
-    const fwd=new THREE.Vector3(Math.sin(this.p.yaw),0,Math.cos(this.p.yaw));
     const focus = this.f.pos.clone();
     if (this.state === 'gag') focus.lerp(this.world.starPatch.position, .42);
     const view = focus.sub(this.p.pos).setY(0).normalize();
-    if (this.starState === 'carried' && this.camInit) {
-      const cameraForward = this.camLook.clone().sub(this.camPos).setY(0).normalize();
-      const carryBlend = this.state !== 'gag' ? 1 : this.f.mode === 'comeback'
-        ? THREE.MathUtils.smoothstep(this.f.recoveryT, .1, 1.15) : 0;
-      view.lerp(cameraForward, carryBlend).normalize();
-    }
     const viewSide = new THREE.Vector3(-view.z, 0, view.x);
-    this.wishGlow = THREE.MathUtils.damp(this.wishGlow, this.wishing && this.state === 'walk' ? 1 : 0, 3, dt);
-    const lantern = this.starState === 'carried' && this.state !== 'gag';
-    this.inspect.anchor.copy(this.p.pos).addScaledVector(view, lantern ? .82 : .96)
-      .addScaledVector(viewSide, lantern ? -.34 : (this.state === 'gag' ? -.16 : -.15))
-      .add(new THREE.Vector3(0, lantern ? .62 : (this.state === 'gag' ? .68 : .92), 0));
-    const patch = this.world.starPatch;
-    patch.visible = this.state === 'inspect' || (this.state === 'gag' && this.f.mode !== 'comeback');
-    patch.material.opacity = this.f.mode === 'peek' ? .76 * (1 - THREE.MathUtils.smoothstep(this.f.gagT, 0, .8)) : .76;
-    if (this.state === 'inspect') {
-      const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
-      patch.position.copy(this.p.pos).addScaledVector(fwd, 2 + this.inspect.pitch * .45)
-        .addScaledVector(side, .6 + Math.sin(this.inspect.yaw) * .55);
+    if (this.wishing) this.wishGlow = Math.min(1, this.wishGlow + dt / 1.6);
+    else if (this.state === 'walk') this.wishGlow = Math.max(0, this.wishGlow - dt * 2.4);
+    const charge = THREE.MathUtils.smoothstep(this.wishGlow, 0, 1);
+    const lantern = this.starState === 'carried';
+    if (lantern && this.camInit) {
+      const side = new THREE.Vector3(-this.carryForward.z, 0, this.carryForward.x).normalize();
+      this.inspect.anchor.copy(this.camPos).addScaledVector(this.carryForward, 1.04)
+        .addScaledVector(side, -.32 + .17 * charge);
+      this.inspect.anchor.y -= .36 - .21 * charge;
+    } else {
+      this.inspect.anchor.copy(this.p.pos).addScaledVector(view, .96)
+        .addScaledVector(viewSide, -.15).add(new THREE.Vector3(0, .92, 0));
     }
-    if (patch.visible) patch.position.y = this.world.heightAt(patch.position.x, patch.position.z) + .045;
-    s.userData.halo.material.opacity=this.starState==='placed' ? .65 : (lantern ? .2 : .12);
-    s.userData.star.material.emissiveIntensity=this.starState==='placed' ? 1.12 : (this.starState==='carried' ? .85 + this.wishGlow * 1.1 : .8);
+    const patch = this.world.starPatch;
+    patch.visible = this.starState === 'carried' && this.state !== 'approach-base';
+    if (patch.visible) {
+      const step = Math.min(.96, this._progress(this.p.pos) + .06);
+      const destination = this.world.path.curve.getPointAt(step);
+      if (this.state === 'gag' && this.f.mode !== 'comeback') {
+        destination.copy(this.lightOrigin).lerp(this.lightEnd,
+          this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, 0, .85) : 1);
+      }
+      patch.position.lerp(destination, 1 - Math.exp(-5 * dt));
+      const bankDistance = Math.hypot(patch.position.x - this.world.playSnow.x, patch.position.z - this.world.playSnow.z);
+      patch.position.y = this.world.heightAt(patch.position.x, patch.position.z) + .06 +
+        .1 * (1 - THREE.MathUtils.smoothstep(bankDistance, .12, 1.1));
+      patch.material.opacity = .24 + charge * .19;
+    }
+    s.userData.halo.material.opacity = this.starState === 'placed' ? .65 : (lantern ? .2 + charge * .46 : .12);
+    s.userData.star.material.emissiveIntensity = this.starState === 'placed' ? 1.12 :
+      (this.starState === 'carried' ? .85 + charge * 1.6 : .8);
     if (this.starState === 'ground') {
-      L.intensity = 2.4;
+      L.intensity = 1.4;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
       s.rotation.y = Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z);
     } else if (this.starState === 'inspect') {
@@ -560,7 +637,7 @@ export class Story {
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
-      L.intensity += (0.7 + this.wishGlow * 1.9 - L.intensity) * Math.min(1, 4 * dt);
+      L.intensity += (0.65 + charge * 3.1 - L.intensity) * Math.min(1, 4 * dt);
       const goal = this.inspect.anchor;
       s.position.lerp(goal, 1 - Math.exp(-6 * dt));
       const sweep = this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, .30, 1.4) : 1;
@@ -576,7 +653,6 @@ export class Story {
   _updateBeats(dt) {
     if (this.nameKickerT >= 0) { this.nameKickerT += dt; if (this.nameKickerT > 2.2) this.nameKickerT = -1; }
     if (this.foxReactT >= 0) { this.foxReactT += dt; if (this.foxReactT > 0.9) this.foxReactT = -1; }
-    if (this.stealT >= 0) { this.stealT += dt; if (this.stealT > 1.6) this.stealT = -1; }
     if (this.replyT >= 0) this.replyT += dt;
     if(this.state==='pickup') {
       this.pickupT+=dt;
@@ -606,7 +682,7 @@ export class Story {
       const mid = this.placeFrom.clone().lerp(to, k);
       mid.y += Math.sin(k * Math.PI) * .11;
       this.star.position.copy(mid);
-      this.star.userData.light.intensity = 1.1 + k * 2.2;
+      this.star.userData.light.intensity = THREE.MathUtils.lerp(1.1 + this.wishGlow * 2.6, 3.3, k);
       if (this.placeT >= 2.15) {
         this.starState = 'awakening';
         this.state = 'awakening';
@@ -688,6 +764,11 @@ export class Story {
       goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .145))
         .lerp(this.f.pos, .09).add(new THREE.Vector3(0, .88, 0));
       goalLook.lerp(this.world.baseTop, .82 * THREE.MathUtils.smoothstep(pr, .83, 1));
+      if (this._atGate()) {
+        const reveal = THREE.MathUtils.smoothstep(this.lanternT, .58, 1.7);
+        const lamp = this.world.courtyardLantern.position;
+        goalLook.lerp(lamp.clone().lerp(this.world.baseTop, reveal), .48);
+      }
       if (this.state === 'gag') {
         const landing = this.world.starPatch.position;
         const patchWeight = this.f.mode === 'chase'
@@ -700,10 +781,10 @@ export class Story {
       }
     }
     if (this.state === 'cover' || this.state === 'intro') {
-      const wide = this.world.path.samples[0].clone().add(new THREE.Vector3(1, 3.5, 3.9));
+      const wide = this.world.path.samples[0].clone().add(new THREE.Vector3(.72, 2.65, 2.9));
       const t = this.state === 'cover' ? 0 : THREE.MathUtils.smoothstep(this.intro, 0, 1.55);
       goalPos.lerp(wide, 1 - t);
-      goalLook.lerp(this.world.path.curve.getPointAt(.18).add(new THREE.Vector3(0, 1, 0)), 1 - t);
+      goalLook.lerp(this.starGroundPos.clone().lerp(this.f.pos, .48).add(new THREE.Vector3(0, .6, 0)), 1 - t);
     }
     if (this.pullbackT >= 0) {
       const e = this.reducedMotion ? 1 : THREE.MathUtils.smoothstep(this.pullbackT, 0, 4.8);
@@ -719,6 +800,7 @@ export class Story {
     camera.lookAt(this.camLook);
     camera.rotateY(this.look.yaw);
     camera.rotateX(this.look.pitch);
+    camera.getWorldDirection(this.carryForward);
     this.hands.visible = ['pickup', 'inspect', 'placing'].includes(this.state) ||
       this.starState === 'carried';
     if (this.hands.visible) {
@@ -731,11 +813,11 @@ export class Story {
   // —— UI 同步（每步调用，DOM 只在变化时写）——
   _syncUi() {
     const nearStar = this.starState === 'ground' && this.p.pos.distanceTo(this.starGroundPos) < 2.2;
-    const nearBase = this.starState === 'carried' && this.p.pos.distanceTo(this.world.basePos) < 3.7;
+    const nearBase = this._atGate();
     if (!this.ui) return;
     this.ui.setPrompt(
       this.state === 'walk' && !this.p.target && this.f.offered && nearStar ? '拾起星星' :
-      this.state === 'walk' && !this.p.target && nearBase ? '安放星星' : null,
+      this.canLightLantern() ? '请狐狸点灯' : this.canPlace() ? '安放星星' : null,
     );
     const flipped = this.flippedOnce && Math.abs(Math.sin(this.inspect.yaw / 2)) > .7;
     this.ui.setInspect(this.state === 'inspect', this.config, flipped, this.flippedOnce);
@@ -744,8 +826,8 @@ export class Story {
       this.starState === 'ground' ? '跟着暖光走' : '跟上小狐狸',
     );
     this.ui.setNameKicker(this.nameKickerT >= 0 && this.nameKickerT < 2.2 ? this.config.toName : null);
-    const stealToast = this.stealT >= 0 && this.stealT < 1.6 ? this.config.starText : null;
-    this.ui.setToast(stealToast || (this.time < this.toastUntil ? this.config.walkLine : null));
+    this.ui.setWishCharge(this.wishing, this.wishGlow);
+    this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
   }
 }
 
@@ -762,8 +844,9 @@ function buildAutoScript() {
   return [
     {t:.4,intent:{type:'start'}},{t:2.1,intent:{type:'advance'}},
     {t:5.15,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
-    {t:12,intent:{type:'continue'}}, route(18,.20),
-    route(24,.43),route(33,.60),route(41,.75),route(47,.88),route(53,1),
-    {t:59,intent:{type:'place'}},
+    {t:12,intent:{type:'continue'}}, route(14,.22),
+    route(26,.43),route(34,.60),route(41,.75),route(47,.88),route(53,1),
+    {t:59,intent:{type:'light-lantern'}},
+    {t:62,intent:{type:'wish',active:true}},{t:64,intent:{type:'place'}},
   ];
 }

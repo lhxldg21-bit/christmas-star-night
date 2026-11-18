@@ -38,7 +38,7 @@ function mulberry32(a) {
 }
 const rand = mulberry32(SEED);
 
-const DURATION = 84; // 自动样片一整趟的时长（秒）
+const DURATION = 92; // 自动样片一整趟的时长（秒）
 
 const SKY = new THREE.Color(PALETTE.nightHorizon);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -170,7 +170,8 @@ function pickAt(clientX, clientY) {
   const rect = surface.getBoundingClientRect();
   ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
-  if (raycaster.intersectObject(star, true).length) return 'star';
+  if (story.canLightLantern() && raycaster.intersectObject(world.courtyardLantern.bulb).length) return 'lantern';
+  if (raycaster.intersectObject(star.userData.star).length) return 'star';
   if (raycaster.intersectObject(fox.group, true).length) return 'fox';
   return null;
 }
@@ -179,7 +180,11 @@ surface.addEventListener('pointerdown', (event) => {
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, dragged: false,
     mode: story.state, t: performance.now(), yaw: story.look.yaw, pitch: story.look.pitch,
     starYaw: story.inspect.yaw, starPitch: story.inspect.pitch };
-  if (story.state === 'walk') story.holdWalk = true;
+  if (story.state === 'walk') {
+    pointer.hit = pickAt(event.clientX, event.clientY);
+    pointer.wish = pointer.hit === 'star' && story.canPlace();
+    if (pointer.wish) story.queueIntent({type: 'wish', active: true});
+  }
   story.lookActive = true;
   surface.setPointerCapture(event.pointerId);
 });
@@ -189,6 +194,10 @@ surface.addEventListener('pointermove', (event) => {
   if (Math.hypot(x, y) < 8 && !pointer.dragged) return;
   pointer.dragged = true;
   story.holdWalk = false;
+  if (pointer.wish) {
+    pointer.wish = false;
+    story.queueIntent({type: 'wish', active: false});
+  }
   if (pointer.mode === 'inspect') {
     story.inspect.yaw = pointer.starYaw + x * .012;
     story.inspect.pitch = clamp(pointer.starPitch + y * .008, -.9, .9);
@@ -202,15 +211,24 @@ surface.addEventListener('pointerup', (event) => {
   story.holdWalk = false;
   story.lookActive = false;
   const quick = !pointer.dragged && (performance.now() - pointer.t < 200);
-  if (quick && pointer.mode === 'walk' && story.state === 'walk') {
+  if (pointer.wish) {
+    story.queueIntent({type: 'wish', active: false});
+    if (!pointer.dragged) story.queueIntent({type: 'place'});
+  } else if (quick && pointer.mode === 'walk' && story.state === 'walk') {
     const hit = pickAt(event.clientX, event.clientY);
-    if (hit === 'star') story.queueIntent({ type: 'pickup' });
+    if (hit === 'star' && story.starState === 'ground') story.queueIntent({ type: 'pickup' });
+    else if (hit === 'lantern') story.queueIntent({ type: 'light-lantern' });
     else if (hit === 'fox') story.queueIntent({ type: 'foxTap' });
     else story.queueIntent({ type: 'advance' });
   }
   pointer = null;
 });
-surface.addEventListener('lostpointercapture', () => { pointer = null; story.holdWalk = false; story.lookActive = false; });
+surface.addEventListener('lostpointercapture', () => {
+  if (pointer?.wish) story.queueIntent({type: 'wish', active: false});
+  pointer = null;
+  story.holdWalk = false;
+  story.lookActive = false;
+});
 
 // —— 主循环：固定步长推进故事，雪是时间的解析函数 ——
 const hud = document.getElementById('hud');
@@ -238,7 +256,7 @@ function draw() {
   scene.fog.far = 66 + 44 * fk;
   for (const material of world.ridgeMaterials) material.opacity = 1 - fk;
   const lighting = THREE.MathUtils.smoothstep(story.awakenT, .45, 3.6);
-  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, lighting);
+  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, Math.max(lighting, story.wishGlow * .85));
   renderer.toneMappingExposure = 1.05 + 0.08 * fk;
   renderer.info.reset();
   composer.render();
@@ -251,6 +269,8 @@ function draw() {
 }
 
 function animate() {
+  if (pointer?.mode === 'walk' && !pointer.dragged && !pointer.wish && !pointer.hit &&
+      performance.now() - pointer.t >= 200) story.holdWalk = true;
   const dt = Math.min(clock.getDelta(), 0.1);
   acc += dt;
   while (acc >= STEP) {
