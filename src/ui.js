@@ -16,7 +16,8 @@ export class UI {
     this._buildControls();
     this._buildBadge(source);
     this._buildFade(auto);
-    this.journey=this._el('div','journey-hint hide',null,'轻点雪路，跟着小狐狸慢慢走');
+    this.journey=this._el('button','journey-hint hide',null,'跟上小狐狸');
+    this.journey.addEventListener('click', () => this.onIntent({ type: 'advance' }));
   }
 
   _el(tag, cls, parent, html) {
@@ -95,7 +96,7 @@ export class UI {
     this._el('p','end-sub',box,'愿这一路的温柔，陪你走进下一个冬天。');
     const row = this._el('div', 'end-links', box);
     const again = this._el('a', '', row, '再走一遍');
-    again.href = location.pathname + location.search;
+    again.href = location.pathname + location.search + location.hash;
     again.addEventListener('click', () => location.reload());
   }
 

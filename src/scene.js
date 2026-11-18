@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { loadConfig } from './config.js';
 import { buildWorld, PALETTE } from './world.js';
-import { buildPlayer, buildFox, buildStar } from './characters.js';
+import { buildMittens, buildFox, buildStar } from './characters.js';
 import { AudioEngine } from './audio.js';
 import { UI } from './ui.js';
 import { Story } from './story.js';
@@ -64,14 +64,16 @@ if (CAPTURE_MODE) {
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(PALETTE.nightTop);
-scene.fog = new THREE.Fog(SKY, 18, 100);
+scene.fog = new THREE.Fog(SKY, 10, 66);
 
-const camera = new THREE.PerspectiveCamera(46, VIEW_WIDTH / VIEW_HEIGHT, 0.1, 420);
+const camera = new THREE.PerspectiveCamera(VIEW_WIDTH < VIEW_HEIGHT ? 63 : 49, VIEW_WIDTH / VIEW_HEIGHT, 0.07, 420);
 
 // —— 灯光：冷月为主，琥珀点光为辅 ——
-scene.add(new THREE.HemisphereLight(0x8fa1d8, 0x455768, 0.80));
-const moonLight = new THREE.DirectionalLight(0xb6d5ef, 0.85);
-moonLight.position.set(-18, 30, 12);
+scene.add(new THREE.HemisphereLight(0xa3a6df, 0x777096, 0.66));
+const moonLight = new THREE.DirectionalLight(0xb6c9ff, 1.10);
+moonLight.position.set(-17, 25, -22);
+moonLight.target.position.set(0, 0, -10);
+scene.add(moonLight.target);
 moonLight.castShadow = true;
 moonLight.shadow.mapSize.set(2048, 2048);
 moonLight.shadow.camera.left = -28;
@@ -80,24 +82,25 @@ moonLight.shadow.camera.top = 28;
 moonLight.shadow.camera.bottom = -28;
 moonLight.shadow.camera.far = 80;
 moonLight.shadow.radius = 4;
+moonLight.shadow.normalBias = .035;
 moonLight.shadow.bias = -0.0008;
 scene.add(moonLight);
-const fill = new THREE.DirectionalLight(0x9dbac6, 0.45);
+const fill = new THREE.DirectionalLight(0xa1abeb, 0.34);
 fill.position.set(12, 8, -16);
 scene.add(fill);
 
 // —— 世界与角色 ——
 const world = buildWorld(scene, rand);
 const { config, source } = loadConfig();
-const player = buildPlayer();
+const hands = buildMittens();
 const fox = buildFox();
 fox.group.scale.setScalar(1.3); // 夜里雪地上要读得出同伴
 const star = buildStar(config);
-scene.add(player.group, fox.group, star);
+scene.add(hands, fox.group, star);
 
 const audio = new AudioEngine();
 const story = new Story({
-  scene, world, player, fox, star, config, audio,
+  scene, world, hands, fox, star, config, audio,
   auto: AUTO,
   ui: null,
 });
@@ -108,31 +111,39 @@ const ui = new UI({
 story.ui = ui;
 story.reset();
 
-// —— 输入：点击/触摸移动；检视拖动旋转 ——
-const ray = new THREE.Raycaster();
-const ndc = new THREE.Vector2();
-let dragging = false;
-let lastX = 0, lastY = 0;
-renderer.domElement.style.touchAction = 'none';
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (story.state === 'inspect') {
-    dragging = true;
-    lastX = e.clientX; lastY = e.clientY;
-    return;
+// 点按前进，拖动检视星星或在停步时看向两侧。
+const surface = renderer.domElement;
+surface.style.touchAction = 'none';
+let pointer = null;
+const clamp = THREE.MathUtils.clamp;
+const rad = THREE.MathUtils.degToRad;
+surface.addEventListener('pointerdown', (event) => {
+  if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect'].includes(story.state)) return;
+  if (story.state === 'walk' && story.p.target) return;
+  pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, dragged: false,
+    mode: story.state, yaw: story.look.yaw, pitch: story.look.pitch,
+    starYaw: story.inspect.yaw, starPitch: story.inspect.pitch };
+  surface.setPointerCapture(event.pointerId);
+});
+surface.addEventListener('pointermove', (event) => {
+  if (pointer?.id !== event.pointerId || story.state !== pointer.mode) return;
+  const x = event.clientX - pointer.x, y = event.clientY - pointer.y;
+  if (Math.hypot(x, y) < 8 && !pointer.dragged) return;
+  pointer.dragged = true;
+  if (pointer.mode === 'inspect') {
+    story.inspect.yaw = pointer.starYaw + x * .012;
+    story.inspect.pitch = clamp(pointer.starPitch + y * .008, -.9, .9);
+  } else {
+    story.look.yaw = clamp(pointer.yaw + x * .0045, -rad(25), rad(25));
+    story.look.pitch = clamp(pointer.pitch + y * .004, -rad(15), rad(10));
   }
-  if (story.state !== 'walk') return;
-  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-  ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObject(world.ground, false)[0];
-  if (hit) story.queueIntent({ type: 'move', x: hit.point.x, z: hit.point.z });
 });
-addEventListener('pointermove', (e) => {
-  if (!dragging || story.state !== 'inspect') return;
-  story.inspect.yaw += (e.clientX - lastX) * 0.012;
-  story.inspect.pitch = THREE.MathUtils.clamp(story.inspect.pitch + (e.clientY - lastY) * 0.008, -0.9, 0.9);
-  lastX = e.clientX; lastY = e.clientY;
+surface.addEventListener('pointerup', (event) => {
+  if (pointer?.id !== event.pointerId) return;
+  if (!pointer.dragged && pointer.mode === 'walk' && story.state === 'walk') story.queueIntent({ type: 'advance' });
+  pointer = null;
 });
-addEventListener('pointerup', () => { dragging = false; });
+surface.addEventListener('lostpointercapture', () => { pointer = null; });
 
 // —— 主循环：固定步长推进故事，雪是时间的解析函数 ——
 const hud = document.getElementById('hud');
@@ -217,6 +228,7 @@ window.__restore = () => {
 addEventListener('resize', () => {
   if (FIXED_CAPTURE_VIEWPORT) return;
   camera.aspect = innerWidth / innerHeight;
+  camera.fov = innerWidth < innerHeight ? 63 : 49;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   if (paused) {

@@ -25,6 +25,25 @@ export function buildStar(config) {
     emissive: PALETTE.starAmber, emissiveIntensity: 0.25,
   });
   const star = new THREE.Mesh(geo, starMat);
+  const facets = [];
+  for (let i = 0; i < 10; i++) {
+    const edge = (j) => {
+      const a = j * Math.PI / 5 + Math.PI / 2, r = j % 2 === 0 ? R : .10;
+      return [Math.cos(a) * r, Math.sin(a) * r, .024];
+    };
+    facets.push(0, 0, .105, ...edge(i), ...edge(i + 1));
+  }
+  const facetsGeo = new THREE.BufferGeometry();
+  facetsGeo.setAttribute('position', new THREE.Float32BufferAttribute(facets, 3));
+  facetsGeo.computeVertexNormals();
+  const tones = [0xffda81, 0xffbd59, 0xffedaa, 0xf5a64e, 0xffcf6e];
+  const colors = new Float32Array(90);
+  for (let i = 0; i < 10; i++) {
+    const color = new THREE.Color(tones[i % tones.length]);
+    for (let j = 0; j < 3; j++) color.toArray(colors, (i * 3 + j) * 3);
+  }
+  facetsGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  group.add(new THREE.Mesh(facetsGeo, new THREE.MeshBasicMaterial({ vertexColors: true })));
   star.castShadow = true;
   group.add(star);
 
@@ -103,71 +122,32 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // —— 人物：蓝大衣 + 莓红围巾，冬夜剪影感 ——
-export function buildPlayer() {
-  const g = new THREE.Group();
-  const coat = mat(PALETTE.coatBlue);
-  const dark = mat(0x2c3247);
-  const skin = mat(0xf2d7bd);
-  const berry = mat(PALETTE.berry);
-
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.26, 0.62, 8), coat);
-  body.position.y = 0.62;
-  body.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 7), skin);
-  head.position.y = 1.12;
-  head.castShadow = true;
-  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.22, 8), berry);
-  hat.position.y = 1.28;
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.175, 0.05, 8), mat(PALETTE.cream));
-  brim.position.y = 1.19;
-  // 围巾：颈圈 + 垂条（垂条单独动画）
-  const scarfRing = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.05, 6, 10), berry);
-  scarfRing.position.y = 0.98;
-  scarfRing.rotation.x = Math.PI / 2;
-  const scarfTail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.3, 0.03), berry);
-  scarfTail.position.set(0.1, 0.82, -0.16);
-  scarfTail.castShadow = true;
-
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.34, 0.12), dark);
-  const legR = legL.clone();
-  legL.position.set(-0.09, 0.17, 0);
-  legR.position.set(0.09, 0.17, 0);
-  const makeArm=(side)=>{
-    const arm=new THREE.Group();arm.position.set(side*.19,.9,0);
-    const upper=new THREE.Mesh(new THREE.CylinderGeometry(.065,.07,.22,8),coat);upper.position.y=-.11;
-    const elbow=new THREE.Group();elbow.position.y=-.21;
-    const fore=new THREE.Mesh(new THREE.CylinderGeometry(.06,.065,.23,8),coat);fore.position.y=-.115;
-    const mitten=new THREE.Mesh(new THREE.SphereGeometry(.072,8,6),mat(PALETTE.cream));mitten.position.y=-.23;
-    const shoulder=new THREE.Mesh(new THREE.SphereGeometry(.075,8,6),coat);
-    elbow.add(fore,mitten);arm.add(upper,elbow,shoulder);arm.userData.elbow=elbow;
-    return arm;
-  };
-  const armL=makeArm(-1),armR=makeArm(1);
-  // Each limb owns its geometry; translating a shared clone twice displaced both legs.
-  legR.geometry=legL.geometry.clone();
-  for(const leg of [legL,legR]){leg.geometry.translate(0,-.15,0);leg.position.y=.34;leg.castShadow=true;}
-  g.add(body, head, hat, brim, scarfRing, scarfTail, legL, legR, armL, armR);
-  return {
-    group: g,
-    limbs: { legL, legR, armL, armR, scarfTail, body, head },
-    // phase：步态相位；moving 0~1 淡入摆臂
-    pose(phase, moving, t) {
-      const s = Math.sin(phase), c = Math.sin(phase + Math.PI);
-      legL.rotation.x = s * 0.55 * moving;
-      legR.rotation.x = c * 0.55 * moving;
-      armL.rotation.x = c * 0.4 * moving;
-      armL.userData.elbow.rotation.x=0;armR.userData.elbow.rotation.x=0;
-      armR.rotation.x = s * 0.4 * moving;
-      body.position.y = 0.62 + Math.abs(Math.sin(phase)) * 0.035 * moving;
-      head.position.y = 1.12 + Math.abs(Math.sin(phase)) * 0.03 * moving;
-      scarfTail.rotation.x = 0.25 + Math.sin(t * 2.1) * 0.12 + moving * 0.35;
-      // 待机呼吸
-      if (moving < 0.05) body.scale.y = 1 + Math.sin(t * 1.4) * 0.008;
-    },
-  };
+export function buildMittens() {
+  const group = new THREE.Group();
+  const wool = mat(0x444458, { flatShading: false });
+  const cuff = mat(0x70677b);
+  const sleeve = mat(0x303950);
+  const ellipsoid = new THREE.SphereGeometry(1, 12, 8);
+  for (const side of [-1, 1]) {
+    const wrist = new THREE.Group();
+    wrist.position.set(side * .145, -.115, .045);
+    wrist.rotation.z = side * .34;
+    const palm = new THREE.Mesh(ellipsoid, wool);
+    palm.scale.set(.068, .105, .053);
+    const thumb = new THREE.Mesh(ellipsoid, wool);
+    thumb.position.set(-side * .052, .024, -.018);
+    thumb.scale.set(.03, .061, .031);
+    const trim = new THREE.Mesh(new THREE.CylinderGeometry(.067, .070, .055, 10), cuff);
+    trim.position.y = -.095;
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.064, .093, .28, 10), sleeve);
+    arm.position.y = -.245;
+    wrist.add(arm, trim, palm, thumb);
+    group.add(wrist);
+  }
+  group.visible = false;
+  return group;
 }
 
-// —— 狐狸：琥珀锈色，奶油胸与尾尖。腿/尾/头可动 ——
 export function buildFox() {
   const g = new THREE.Group();
   const rust = mat(PALETTE.foxRust);
@@ -192,25 +172,28 @@ export function buildFox() {
 
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), rust);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.167, 12, 8), rust);
+  head.scale.set(1.04, .91, 1.06);
   head.castShadow = true;
-  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.20, 6), cream);
+  const snout = new THREE.Mesh(new THREE.CylinderGeometry(.025, .127, .185, 7), cream);
+  snout.scale.set(.82, 1, 1);
   snout.rotation.z=-Math.PI/2;
-  snout.position.set(0.14, -0.03, 0);
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), dark);
+  snout.position.set(0.135, -0.044, 0);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), mat(0x2d2430));
   nose.position.set(0.21, -0.02, 0);
   const earL = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.18, 4), rust);
   const earR = earL.clone();
   earL.position.set(-0.03, 0.16, -0.085);
   earR.position.set(-0.03, 0.16, 0.085);
   for (const side of [-1,1]) {
+    const lining = new THREE.Mesh(new THREE.ConeGeometry(.046, .127, 3), mat(0xe4a098));
+    lining.position.set(.013, .176, side * .081);
+    headPivot.add(lining);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(.019,8,6),mat(0x202b36));
-    eye.position.set(.07,.025,side*.125); headPivot.add(eye);
+    eye.position.set(.102,.038,side*.134); headPivot.add(eye);
     const shine = new THREE.Mesh(new THREE.SphereGeometry(.006,6,4),mat(0xffffff));
-    shine.position.set(.078,.031,side*.14);headPivot.add(shine);
+    shine.position.set(.110,.045,side*.149);headPivot.add(shine);
   }
-  const snowball = new THREE.Mesh(new THREE.SphereGeometry(.062,8,6),mat(0xffffff));
-  snowball.position.set(.21,.04,0);snowball.visible=false;headPivot.add(snowball);
   headPivot.add(head, snout, nose, earL, earR);
 
   // A small puff burst makes the nose-snow gag legible even in a still frame.
@@ -229,9 +212,9 @@ export function buildFox() {
   const tailPivot = new THREE.Group();
   tailPivot.position.set(-0.24, 0.34, 0);
   const tail = new THREE.Mesh(new THREE.SphereGeometry(.18,8,6), rust);
-  tail.scale.set(1.5,.7,.7);tail.position.x = -0.18;
+  tail.scale.set(1.75,.92,.89);tail.position.x = -0.20;
   const tailTip = new THREE.Mesh(new THREE.SphereGeometry(.115,8,6), cream);
-  tailTip.scale.set(1.15,.75,.75);tailTip.position.x = -0.38;
+  tailTip.scale.set(1.33,1.08,1.06);tailTip.position.x = -0.43;
   tail.castShadow = true;
   tailPivot.add(tail, tailTip);
   tailPivot.rotation.z = 0.5;
@@ -244,10 +227,11 @@ export function buildFox() {
     legs.push(leg);
     g.add(leg);
   }
+  collar.position.y = .31;
   g.add(body, chest, collar, bell, headPivot, tailPivot);
   return {
     group: g,
-    parts: { body, headPivot, tailPivot, legs, nose, snowball, snowPuffs },
+    parts: { body, headPivot, tailPivot, legs, snowPuffs },
     // gait：步频相位；moving 0~1；sitting：坐下姿态权重
     pose(phase, moving, sitting, t) {
       const swing = 0.7 * moving;
@@ -262,11 +246,6 @@ export function buildFox() {
       headPivot.rotation.y = 0;
       tailPivot.rotation.z = 0.5 + sitting * 0.5;
       tailPivot.rotation.y = Math.sin(t * (moving > 0.1 ? 6 : 2.2)) * (moving > 0.1 ? 0.25 : 0.12);
-    },
-    // 雪落鼻尖后的甩头
-    shakeHead(k) {
-      headPivot.rotation.y = Math.sin(k * Math.PI * 5) * 0.5 * (1 - k);
-      headPivot.rotation.z = Math.sin(k * Math.PI * 3) * 0.25 * (1 - k);
     },
   };
 }

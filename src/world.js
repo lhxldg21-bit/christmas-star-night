@@ -5,16 +5,16 @@ import * as THREE from 'three';
 export const PALETTE = {
   snow: 0xf3eee6,
   snowShade: 0xdfe4f2,
-  nightTop: 0x101e30,
-  nightHorizon: 0x263e57,
+  nightTop: 0x10152d,
+  nightHorizon: 0x3c4b71,
   amber: 0xffb45e,
   starAmber: 0xffd27a,
   berry: 0xb03048,
-  pine: 0x435b60,
+  pine: 0x243b47,
   pineSnow: 0xe9ecf4,
-  bark: 0x4a3a33,
+  bark: 0x4b3e45,
   stone: 0x8a8fa3,
-  foxRust: 0xc97b4a,
+  foxRust: 0xd98444,
   cream: 0xf5e8d8,
   coatBlue: 0x566f83,
 };
@@ -78,7 +78,7 @@ export function buildWorld(scene, rand) {
   world.heightAt = heightAt;
 
   // —— 地面：半径足够大，任何合法机位看不到边缘 ——
-  const SEG = 160, SIZE = 260;
+  const SEG = 130, SIZE = 150;
   const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -107,23 +107,40 @@ export function buildWorld(scene, rand) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
   const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 1, metalness: 0, flatShading: true,
+    vertexColors: true, roughness: 1, metalness: 0,
   }));
   ground.receiveShadow = true;
   scene.add(ground);
   world.ground = ground;
-  const trailVertices=[],trailIndices=[];
+  const trailVertices=[],trailIndices=[],trailColors=[];
+  const trailTint = new THREE.Color(0x97a0c3);
   for(let i=0;i<=160;i++){
     const t=i/160, point=path.curve.getPointAt(t), tangent=path.curve.getTangentAt(t);
-    for(const side of [-1,1]){
-      const x=point.x-tangent.z*.70*side,z=point.z+tangent.x*.70*side;
-      trailVertices.push(x,heightAt(x,z)+.014,z);
+    for(const side of [-1,-.69,.69,1]){
+      const width = .94 + .10 * Math.sin(i * .31 + side) + .07 * Math.cos(i * .19);
+      const x=point.x-tangent.z*width*side,z=point.z+tangent.x*width*side;
+      trailVertices.push(x,heightAt(x,z)+.020,z);
+      trailColors.push(trailTint.r, trailTint.g, trailTint.b, Math.abs(side) === 1 ? 0 : .41);
     }
-    if(i<160){const k=i*2;trailIndices.push(k,k+2,k+1,k+1,k+2,k+3);}
+    if(i<160) for(let j=0;j<3;j++){const k=i*4+j;trailIndices.push(k,k+4,k+1,k+1,k+4,k+5);}
   }
-  const trailGeo=new THREE.BufferGeometry();trailGeo.setAttribute('position',new THREE.Float32BufferAttribute(trailVertices,3));trailGeo.setIndex(trailIndices);trailGeo.computeVertexNormals();
-  const trail=new THREE.Mesh(trailGeo,new THREE.MeshStandardMaterial({color:0x899db9,roughness:1,transparent:true,opacity:.34,depthWrite:false}));trail.receiveShadow=true;scene.add(trail);
+  const trailGeo=new THREE.BufferGeometry();trailGeo.setAttribute('position',new THREE.Float32BufferAttribute(trailVertices,3));trailGeo.setAttribute('color',new THREE.Float32BufferAttribute(trailColors,4));trailGeo.setIndex(trailIndices);trailGeo.computeVertexNormals();
+  const trail=new THREE.Mesh(trailGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,transparent:true,depthWrite:false,side:THREE.DoubleSide}));trail.receiveShadow=true;scene.add(trail);
 
+  const patchShape = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const a = i * Math.PI / 5 + Math.PI / 2;
+    const radius = i % 2 === 0 ? .42 : .18;
+    patchShape[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(a) * radius, Math.sin(a) * radius);
+  }
+  patchShape.closePath();
+  world.starPatch = new THREE.Mesh(new THREE.ShapeGeometry(patchShape), new THREE.MeshBasicMaterial({
+    color: 0xffc36c, transparent: true, opacity: .76, depthWrite: false,
+    blending: THREE.AdditiveBlending, toneMapped: false,
+  }));
+  world.starPatch.rotation.x = -Math.PI / 2;
+  world.starPatch.visible = false;
+  scene.add(world.starPatch);
   buildSky(scene, world, rand);
   buildPines(scene, world, rand, heightAt, path);
   buildSnowDrifts(scene, rand, heightAt, path);
@@ -176,13 +193,16 @@ function buildSky(scene, world, rand) {
   scene.add(stars);
 
   // 月亮：柔光圆盘
-  const moonTex = makeGlowTexture('#fff3d6', '#fff3d600');
+  const moonTex = makeGlowTexture('#c0c7f089', '#b8c0f000');
   const moon = new THREE.Sprite(new THREE.SpriteMaterial({
     map: moonTex, fog: false, depthWrite: false, transparent: true, opacity: 0.95,
   }));
-  moon.position.set(-26, 27, -85);
+  moon.position.set(-8, 15, -82);
   moon.scale.setScalar(12);
   scene.add(moon);
+  const disk = new THREE.Mesh(new THREE.SphereGeometry(1.4, 18, 12), new THREE.MeshBasicMaterial({color:0xffefd4, fog:false, toneMapped:false}));
+  disk.position.copy(moon.position).z += .25;
+  scene.add(disk);
 }
 
 function makeGlowTexture(inner, outer) {
@@ -203,7 +223,7 @@ function makeGlowTexture(inner, outer) {
 function buildPines(scene, world, rand, heightAt, path) {
   const trunkGeo = new THREE.CylinderGeometry(0.09, 0.16, 0.7, 6);
   trunkGeo.translate(0, 0.35, 0);
-  const tiers = [];
+  const tiers = [], caps = [];
   const tierSpec = [
     [0.85, 1.1, 0.65],
     [0.69, 1.0, 1.18],
@@ -211,9 +231,27 @@ function buildPines(scene, world, rand, heightAt, path) {
     [0.27, .65, 2.05],
   ];
   for (const [r, h, y] of tierSpec) {
-    const cone = new THREE.ConeGeometry(r, h, 7);
-    cone.translate(0, y, 0);
-    tiers.push(cone);
+    const profile = (snow) => {
+      const geo = new THREE.LatheGeometry([
+        new THREE.Vector2(0, -.51), new THREE.Vector2(.72, -.50),
+        new THREE.Vector2(1, -.36), new THREE.Vector2(.77, -.19),
+        new THREE.Vector2(.44, .11), new THREE.Vector2(0, .55),
+      ], 7);
+      const v = geo.attributes.position;
+      for (let i = 0; i < v.count; i++) {
+        const angle = Math.atan2(v.getZ(i), v.getX(i));
+        const wiggle = 1 + .12 * Math.sin(angle * 3 + y * 5);
+        const low = v.getY(i);
+        const x = v.getX(i) * r * wiggle, z = v.getZ(i) * r * wiggle;
+        const lift = snow ? .07 + .13 * (1 + Math.sin(angle * 3 + y)) * Math.max(0, .4 - low) : 0;
+        const lean = y * .09 + low * .1;
+        v.setXYZ(i, x * (snow ? .91 : 1) + lean, y + h * low + lift, z * (snow ? .91 : 1));
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+    tiers.push(profile(false));
+    caps.push(profile(true));
   }
   const foliGeo = mergeGeos(tiers);
 
@@ -221,7 +259,9 @@ function buildPines(scene, world, rand, heightAt, path) {
     {x:-8.5,z:10,s:2.2,rot:0.3},{x:4.8,z:8,s:2.9,rot:1.2},
     {x:-9,z:0,s:3.1,rot:0.4},{x:3.6,z:-1,s:2.0,rot:0.6},
     {x:-7,z:-12,s:2.8,rot:0.9},{x:7.5,z:-12,s:3.3,rot:0.2},
-    {x:-4.5,z:-22,s:2.8,rot:0.5},{x:8,z:-25,s:3.5,rot:0.8}
+    {x:-4.5,z:-22,s:2.8,rot:0.5},{x:8,z:-25,s:3.5,rot:0.8},
+    {x:-4,z:-34,s:2.15,rot:.4}, {x:1,z:-38,s:1.85,rot:.75}, {x:5,z:-35,s:2.35,rot:1.9},
+    {x:-8,z:-33,s:2.45,rot:2.6}, {x:8,z:-39,s:3,rot:1.2}
   ];
   // Hero pines create successive "gates" without closing the walk corridor.
   for (const [t, side, s, tilt] of [
@@ -237,7 +277,7 @@ function buildPines(scene, world, rand, heightAt, path) {
       s, rot: t * 9 + tilt, hero: true,
     });
   }
-  for (let i = 0; i < 240 && placements.length < 100; i++) {
+  for (let i = 0; i < 240 && placements.length < 76; i++) {
     const a = rand() * Math.PI * 2;
     const r = 7 + rand() * 55;
     const x = Math.cos(a) * r, z = Math.sin(a) * r - 4;
@@ -251,12 +291,12 @@ function buildPines(scene, world, rand, heightAt, path) {
     placements.push({ x, z, s: 0.8 + rand() * 1.6, rot: rand() * Math.PI * 2 });
   }
   const trunkMat = mat(PALETTE.bark);
-  const foliMat = mat(PALETTE.pine);
+  const foliMat = mat(PALETTE.pine, { emissive: 0x28304e, emissiveIntensity: .32 });
   // 雪盖：同一几何、浅色、略放大上浮，形成积雪感
-  const snowMat = mat(PALETTE.pineSnow);
+  const snowMat = mat(PALETTE.pineSnow, { flatShading: false });
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, placements.length);
   const folis = new THREE.InstancedMesh(foliGeo, foliMat, placements.length);
-  const snows = new THREE.InstancedMesh(foliGeo, snowMat, placements.length);
+  const snows = new THREE.InstancedMesh(mergeGeos(caps), snowMat, placements.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   placements.forEach((p, i) => {
     // Keep the entire canopy clear of the travelling camera corridor.
@@ -269,12 +309,10 @@ function buildPines(scene, world, rand, heightAt, path) {
     m.compose(new THREE.Vector3(p.x, y, p.z), q, sc.setScalar(p.s));
     trunks.setMatrixAt(i, m);
     folis.setMatrixAt(i, m);
-    m.compose(
-      new THREE.Vector3(p.x, y + 0.045 * p.s, p.z),
-      q,
-      sc.set(p.s * 1.012, p.s * 1.006, p.s * 1.012),
-    );
     snows.setMatrixAt(i, m);
+    const shade = new THREE.Color().setRGB(.72 + .28 * (i % 5) / 4, .78 + .22 * (i % 5) / 4, .93);
+    folis.setColorAt(i, shade);
+    snows.setColorAt(i, shade);
   });
   trunks.castShadow = folis.castShadow = true;
   folis.receiveShadow = true;
@@ -303,7 +341,7 @@ function mergeGeos(geos) {
 // —— 雪堆与石头：半埋的压扁球，制造地形厚度与使用痕迹 ——
 function buildSnowDrifts(scene, rand, heightAt, path) {
   const driftGeo = new THREE.SphereGeometry(1, 8, 6);
-  const driftMat = mat(PALETTE.snow);
+  const driftMat = mat(PALETTE.snow, { flatShading: false });
   const rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
   const rockMat = mat(PALETTE.stone);
   const drifts = new THREE.InstancedMesh(driftGeo, driftMat, 26);
@@ -388,8 +426,8 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
   branchAt(.72, 1, .78);
 
   // Irregular snow shoulders keep the road readable from a low tracking camera.
-  const bankGeo = new THREE.SphereGeometry(1, 7, 5);
-  const banks = new THREE.InstancedMesh(bankGeo, mat(0xe7ebf2), 30);
+  const bankGeo = new THREE.SphereGeometry(1, 11, 7);
+  const banks = new THREE.InstancedMesh(bankGeo, mat(0xe7ebf2, { flatShading: false }), 30);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
@@ -432,72 +470,35 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
   log.position.y = heightAt(log.position.x, log.position.z) + .12;
   detail.add(log);
 
-  // A dedicated snowbank at the first bend gives the fox a readable place to
-  // disappear behind, peek out, and perform the nose-snow beat.
-  const hideP = path.curve.getPointAt(.43);
-  const hideT = path.curve.getTangentAt(.43).normalize();
-  const hideN = new THREE.Vector3(-hideT.z, 0, hideT.x);
-  const bankCenter = hideP.clone().addScaledVector(hideN, 2.05);
-  const bank = new THREE.Group();
-  for (const [side, sx, sy, sz] of [[-.48, .74, .4, .62], [.22, .92, .5, .72], [.72, .58, .34, .5]]) {
-    const lump = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), snowMat);
-    lump.position.set(side, sy * .33, (side * 1.7) % .7);
-    lump.scale.set(sx, sy, sz);
-    lump.castShadow = lump.receiveShadow = true;
-    bank.add(lump);
-  }
-  bank.position.set(bankCenter.x, heightAt(bankCenter.x, bankCenter.z) - .03, bankCenter.z);
-  bank.rotation.y = Math.atan2(hideT.x, hideT.z);
+  // 一层矮软雪接住追光的小狐狸，保留眼高视线。
+  const glintBank = path.curve.getPointAt(.12);
+  const bank = new THREE.Mesh(bankGeo, mat(PALETTE.snow, { flatShading: false }));
+  bank.position.set(glintBank.x + 1.24, heightAt(glintBank.x + 1.24, glintBank.z), glintBank.z);
+  bank.scale.set(.9, .15, .75);
+  bank.receiveShadow = true;
   detail.add(bank);
-  world.foxHidePos = hideP.clone().addScaledVector(hideN, 2.95).addScaledVector(hideT, .22);
-  world.foxHidePos.y = heightAt(world.foxHidePos.x, world.foxHidePos.z);
 
-  // Snow visibly falls from the low canopy above the hiding place. This makes
-  // the later nose-snow gag look caused by the world instead of random VFX.
-  const showerCount = 30;
-  const showerPos = new Float32Array(showerCount * 3);
-  const showerSeeds = [];
-  for (let i = 0; i < showerCount; i++) {
-    showerSeeds.push({
-      x: (rand() - .5) * .72,
-      z: (rand() - .5) * .5,
-      delay: rand() * .8,
-      speed: .55 + rand() * .55,
-    });
-    showerPos[i * 3] = showerSeeds[i].x;
-    showerPos[i * 3 + 1] = .78;
-    showerPos[i * 3 + 2] = showerSeeds[i].z;
+  // 莓枝给眼高镜头提供近景尺度。
+  const twigs = new THREE.InstancedMesh(new THREE.CylinderGeometry(.013, .021, 1, 5), barkMat, 20);
+  const berries = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.047, 0), mat(0xb24d5a), 60);
+  const up = new THREE.Vector3(0, 1, 0), stem = new THREE.Vector3(), center = new THREE.Vector3();
+  for (let i = 0; i < 10; i++) {
+    const t = .035 + .10 * i, tangent = path.curve.getTangentAt(t);
+    const p = path.curve.getPointAt(t).addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), (1.65 + rand() * .35) * (i % 2 ? -1 : 1));
+    p.y = heightAt(p.x, p.z) + .02;
+    for (let j = 0; j < 2; j++) {
+      stem.set((j ? 1 : -1) * (.17 + .1 * rand()), .32 + .24 * rand(), .08 - .16 * rand());
+      q.setFromUnitVectors(up, stem.clone().normalize());
+      m.compose(center.copy(p).addScaledVector(stem, .5), q, s.set(1, stem.length(), 1));
+      twigs.setMatrixAt(i * 2 + j, m);
+      for (let n = 0; n < 3; n++) {
+        center.copy(p).addScaledVector(stem, .58 + n * .18);
+        m.makeTranslation(center.x, center.y, center.z + (n % 2 ? .032 : -.032));
+        berries.setMatrixAt(i * 6 + j * 3 + n, m);
+      }
+    }
   }
-  const showerGeo = new THREE.BufferGeometry();
-  showerGeo.setAttribute('position', new THREE.BufferAttribute(showerPos, 3));
-  const shower = new THREE.Points(showerGeo, new THREE.PointsMaterial({
-    map: makeGlowTexture('#ffffff', '#ffffff00'),
-    color: 0xffffff, size: .065, transparent: true, opacity: .95, depthWrite: false,
-  }));
-  shower.position.copy(world.foxHidePos).add(new THREE.Vector3(0, .95, 0));
-  shower.visible = false;
-  scene.add(shower);
-  world.foxSnowfall = { points: shower, seeds: showerSeeds };
-
-  // The visible source of the ambush: a low, snow-heavy branch over the bank.
-  const branchRoot = hideP.clone().addScaledVector(hideN, 3.45).addScaledVector(hideT, -.85);
-  branchRoot.y = heightAt(branchRoot.x, branchRoot.z) + 2.05;
-  const branchTip = world.foxHidePos.clone().add(new THREE.Vector3(0, 1.55, 0));
-  const branchCurve = new THREE.CatmullRomCurve3([
-    branchRoot,
-    branchRoot.clone().lerp(branchTip, .45).add(new THREE.Vector3(0, .2, 0)),
-    branchTip,
-  ]);
-  const lowBranch = new THREE.Mesh(new THREE.TubeGeometry(branchCurve, 14, .055, 5, false), barkMat);
-  const lowBranchSnow = new THREE.Mesh(
-    new THREE.TubeGeometry(
-      new THREE.CatmullRomCurve3(branchCurve.points.map((v) => v.clone().add(new THREE.Vector3(0, .04, 0)))),
-      14, .026, 5, false,
-    ),
-    snowMat,
-  );
-  detail.add(lowBranch, lowBranchSnow);
-
+  detail.add(twigs, berries);
   scene.add(detail);
   world.pathDetails = detail;
 }
@@ -505,12 +506,12 @@ function buildPathDetails(scene, world, rand, heightAt, path) {
 // —— 路灯：沿路交替排布。灯罩发光 + 地面光晕贴片，真点光只留终点两盏 ——
 function buildLamps(scene, world, path, heightAt) {
   const poleGeo = new THREE.CylinderGeometry(0.05, 0.07, 1.7, 6);
-  const capGeo = new THREE.ConeGeometry(0.22, 0.24, 6);
-  const bulbGeo = new THREE.SphereGeometry(0.11, 8, 6);
+  const capGeo = new THREE.CylinderGeometry(.15, .29, .16, 4);
+  const bulbGeo = new THREE.BoxGeometry(.23, .25, .23);
   const poleMat = mat(0x3a3340);
   const capMat = mat(0x2e2836);
   const glowTex = makeGlowTexture('#ffbf6ecc', '#ffb45e00');
-  const poolTex = makeGlowTexture('#ffc98a55', '#ffc98a00');
+  const poolTex = makeGlowTexture('#ffae60b8', '#ffa14a00');
 
   for (let i = 0; i < 6; i++) {
     const t = 0.18 + i * 0.145;
@@ -535,16 +536,26 @@ function buildLamps(scene, world, path, heightAt) {
     }));
     glow.position.y = 1.68;
     glow.scale.setScalar(1.6);
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({
-      map: poolTex, transparent: true, opacity: 0, depthWrite: false,
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(4.25, 4.25), new THREE.MeshBasicMaterial({
+      map: poolTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
     }));
     pool.rotation.x = -Math.PI / 2;
-    pool.position.y = 0.03;
-    g.add(pole, cap, bulb, glow, pool);
+    pool.position.y = 0.06;
+    const frameGeo = new THREE.BoxGeometry(.037, .29, .037);
+    for (const dx of [-.123, .123]) for (const dz of [-.123, .123]) {
+      const frame = new THREE.Mesh(frameGeo, capMat);
+      frame.position.set(dx, 1.68, dz);
+      g.add(frame);
+    }
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(.31, .06, .31), capMat);
+    shelf.position.y = 1.54;
+    const light = new THREE.PointLight(PALETTE.amber, .22, 5, 1.7);
+    light.position.set(0, 1.55, .15);
+    g.add(pole, cap, bulb, glow, pool, shelf, light);
     g.position.set(x, y, z);
     g.scale.setScalar(0.82);
     scene.add(g);
-    world.lamps.push({ group: g, bulbMat, glow, pool, lit: 0 });
+    world.lamps.push({ group: g, bulbMat, glow, pool, light, lit: 0 });
   }
 }
 
@@ -566,72 +577,70 @@ function buildCourtyard(scene, world, heightAt) {
     const snowCap=new THREE.Mesh(new THREE.BoxGeometry(1.37,.09,.47),mat(PALETTE.snow));
     snowCap.position.copy(w.position);snowCap.position.y+=.30;snowCap.rotation.copy(w.rotation);g.add(snowCap);
   }
-  // 底座：三层石台 + 顶部星座
-  const baseMat = mat(0x9aa0b5);
-  const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.72, 0.18, 10), baseMat);
-  const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.5, 0.38, 10), baseMat);
-  const b3 = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.22, 0.42, 10), baseMat);
   const by = heightAt(cx, cz);
-  b1.position.set(cx, by + 0.09, cz);
-  b2.position.set(cx, by + 0.37, cz);
-  b3.position.set(cx, by + 0.77, cz);
-  b1.castShadow = b2.castShadow = b3.castShadow = true;
-  b1.receiveShadow = true;
-  g.add(b1, b2, b3);
-  const ring=new THREE.Mesh(new THREE.TorusGeometry(.21,.035,6,32),mat(0xc3a56f));
-  ring.rotation.x=Math.PI/2;ring.position.set(cx,by+.99,cz);g.add(ring);
-  const rim=new THREE.Mesh(new THREE.CylinderGeometry(.66,.67,.035,10),mat(PALETTE.snow));
-  rim.position.set(cx,by+.19,cz);g.add(rim);
-  world.baseTop = new THREE.Vector3(cx, by + 1.03, cz);
+  const stone = mat(0x6f7891), trim = mat(0xb2b8ca), socket = mat(0x393648);
+  const block = (w, h, d, x, y, z, material = stone) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.set(cx + x, by + y, cz + z);
+    mesh.castShadow = mesh.receiveShadow = true;
+    g.add(mesh);
+    return mesh;
+  };
+  for (let i = 0; i < 3; i++) {
+    const height = (i + 1) * .24;
+    block(3.5 - i * .30, height, 2.26 - i * .43, 0, height / 2, 1.12 - i * .28);
+  }
+  for (const side of [-1, 1]) {
+    block(.82, .28, .99, side * 1.20, .86, 0, trim);
+    const pillar = block(.62, 2.32, .71, side * 1.18, 2.06, 0);
+    pillar.rotation.z = side * .08;
+    block(.68, .18, .79, side * 1.06, 3.22, 0, trim);
+    const arch = block(.52, 1.37, .72, side * .58, 3.58, 0);
+    arch.rotation.z = side * .83;
+  }
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(.51, .56, .20, 10), trim);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(cx, by + 3, cz - .17);
+  g.add(ring);
+  const recess = new THREE.Mesh(new THREE.CylinderGeometry(.39, .39, .075, 10), socket);
+  recess.rotation.x = Math.PI / 2;
+  recess.position.set(cx, by + 3, cz - .055);
+  g.add(recess);
+  world.baseTop = new THREE.Vector3(cx, by + 3, cz + .028);
   world.basePos = new THREE.Vector3(cx, by, cz);
+  world.stepHeight = ({ x, z }) => {
+    if (Math.abs(x - cx) > 1.35 || z < cz + .4 || z > cz + 2.38) return 0;
+    return .72 * THREE.MathUtils.clamp((cz + 2.38 - z) / 1.3, 0, 1);
+  };
   // 底座常亮点光（安放后增强）
   const baseLight = new THREE.PointLight(PALETTE.starAmber, 0.35, 10, 1.1);
-  baseLight.position.copy(world.baseTop).add(new THREE.Vector3(0, 0.4, 0));
+  baseLight.position.copy(world.baseTop).add(new THREE.Vector3(0, -.4, .75));
   g.add(baseLight);
   world.baseLight = baseLight;
 
-  // 远景小屋剪影：深色体块 + 暖窗
-  const houseMat = mat(0x52616b);
-  const house = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(4.6, 2.6, 3.4), houseMat);
-  body.position.y = 1.3;
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(3.4, 1.8, 4), mat(0xb8c7d2));
-  roof.position.y = 3.5;
-  roof.rotation.y = Math.PI / 4;
-  house.add(body, roof);
-  const door=new THREE.Mesh(new THREE.BoxGeometry(.8,1.65,.08),mat(0x493f3d));door.position.set(0,.825,1.73);house.add(door);
-  const knob=new THREE.Mesh(new THREE.SphereGeometry(.04,6,4),mat(0xd6b46c));knob.position.set(.24,.8,1.8);house.add(knob);
-  const step=new THREE.Mesh(new THREE.BoxGeometry(1.2,.15,.55),mat(0xa9b3ba));step.position.set(0,.075,1.95);house.add(step);
-  const chimney=new THREE.Mesh(new THREE.BoxGeometry(.5,1.2,.6),mat(0x786c69));chimney.position.set(1.2,3.8,-.5);house.add(chimney);
-  const eave=new THREE.Mesh(new THREE.BoxGeometry(4.9,.16,3.7),mat(PALETTE.snow));eave.position.y=2.64;house.add(eave);
-  const winMat = new THREE.MeshStandardMaterial({
-    color: 0xffc98a, emissive: 0xffb45e, emissiveIntensity: 0.9, roughness: 0.5,
-  });
-  for (const [wx, wy] of [[-1.1, 1.3], [0.7, 1.3], [-0.2, 2.1]]) {
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.6), winMat);
-    win.position.set(wx, wy, 1.71);
-    house.add(win);
-    for(const [w,h] of [[.045,.65],[.6,.045]]){
-      const bar=new THREE.Mesh(new THREE.BoxGeometry(w,h,.04),houseMat);bar.position.set(wx,wy,1.74);house.add(bar);
-    }
-  }
-  // One restrained Christmas detail: a snow-dusted evergreen wreath on the door.
-  const wreath = new THREE.Group();
-  const wreathMat = mat(0x315449);
-  const wreathRing = new THREE.Mesh(new THREE.TorusGeometry(.3, .055, 6, 18), wreathMat);
-  const wreathSnow = new THREE.Mesh(new THREE.TorusGeometry(.305, .018, 5, 18), mat(PALETTE.snow));
-  wreathSnow.position.y = .055;
-  wreath.add(wreathRing, wreathSnow);
-  for (const angle of [-.75, -.25, .25, .75]) {
-    const berry = new THREE.Mesh(new THREE.SphereGeometry(.035, 6, 4), mat(PALETTE.berry));
-    berry.position.set(Math.sin(angle) * .3, Math.cos(angle) * .3, .055);
-    wreath.add(berry);
-  }
-  wreath.position.set(0, 1.38, 1.79);
-  house.add(wreath);
-  house.position.set(-10, heightAt(-10, -39), -39);
-  house.rotation.y = 0.35;
-  g.add(house);
+  const root = new THREE.Vector3(cx + 3.05, heightAt(cx + 3.05, cz - 1.45), cz - 1.45);
+  const trunk = mat(0x514754), barkGeo = new THREE.CylinderGeometry(.11, .19, 1, 6);
+  const up = new THREE.Vector3(0, 1, 0);
+  const branch = (from, to, width) => {
+    const a = root.clone().add(new THREE.Vector3(...from));
+    const b = root.clone().add(new THREE.Vector3(...to));
+    const axis = b.clone().sub(a);
+    const mesh = new THREE.Mesh(barkGeo, trunk);
+    mesh.position.copy(a).lerp(b, .5);
+    mesh.scale.set(width, axis.length(), width);
+    mesh.quaternion.setFromUnitVectors(up, axis.normalize());
+    mesh.castShadow = mesh.receiveShadow = true;
+    g.add(mesh);
+  };
+  branch([0, 0, 0], [.19, 2.18, -.18], 1.65);
+  branch([.19, 2.18, -.18], [-.24, 3.84, -.34], 1.26);
+  branch([-.24, 3.84, -.34], [-1.30, 4.40, -.47], .86);
+  branch([-1.30, 4.40, -.47], [-2.37, 4.62, -.52], .55);
+  branch([-1.30, 4.40, -.47], [-1.48, 4.99, -.73], .38);
+  branch([-.24, 3.84, -.34], [.52, 4.77, -.75], .48);
+  branch([.19, 2.18, -.18], [.98, 3.33, -.38], .70);
+  branch([.98, 3.33, -.38], [1.26, 4.10, -.21], .44);
+  branch([.98, 3.33, -.38], [1.65, 3.57, -.88], .36);
 
   scene.add(g);
   world.courtyard = g;
