@@ -127,7 +127,41 @@ export function buildStar(config) {
   ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128);
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: .15, blending: THREE.AdditiveBlending }));
   halo.scale.setScalar(1.6); group.add(halo);
-  group.userData = { halo, star, light, bow, bowTails, note, tagPivot, hang, tag };
+  const fxCanvas = document.createElement('canvas');
+  fxCanvas.width = fxCanvas.height = 256;
+  const fx = fxCanvas.getContext('2d');
+  const sweep = fx.createConicGradient?.(0, 128, 128) ?? fx.createLinearGradient(20, 20, 236, 236);
+  for (const [stop, color] of [[0, '#ffd98a'], [.27, '#9fe0d0'], [.54, '#bda4e9'], [.8, '#ff9fb9'], [1, '#ffd98a']]) {
+    sweep.addColorStop(stop, color);
+  }
+  fx.strokeStyle = sweep;
+  fx.beginPath();
+  fx.arc(128, 128, 108, 0, Math.PI * 2);
+  fx.globalAlpha = .18;
+  fx.lineWidth = 11;
+  fx.stroke();
+  fx.globalAlpha = .82;
+  fx.lineWidth = 3;
+  fx.stroke();
+  const texture = new THREE.CanvasTexture(fxCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const ring = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture, transparent: true, opacity: 0, depthWrite: false,
+  }));
+  ring.visible = false;
+  group.add(ring);
+
+  const dotGeo = new THREE.IcosahedronGeometry(.022, 0);
+  const sparks = Array.from({length: 10}, (_, i) => {
+    const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({
+      color: [0xffd98a, 0x9fe0d0, 0xbda4e9, 0xff9fb9][i % 4],
+      transparent: true, opacity: 0, depthWrite: false,
+    }));
+    dot.visible = false;
+    group.add(dot);
+    return dot;
+  });
+  group.userData = { halo, star, light, bow, bowTails, note, tagPivot, hang, tag, ring, sparks };
   return group;
 }
 

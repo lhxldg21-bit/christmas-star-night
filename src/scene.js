@@ -182,7 +182,7 @@ function pickAt(clientX, clientY) {
   return null;
 }
 surface.addEventListener('pointerdown', (event) => {
-  if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect', 'platform'].includes(story.state)) return;
+  if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect'].includes(story.state)) return;
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, dragged: false,
     mode: story.state, t: performance.now(), yaw: story.look.yaw, pitch: story.look.pitch,
     starYaw: story.inspect.yaw, starPitch: story.inspect.pitch };
@@ -262,7 +262,7 @@ function draw() {
   scene.fog.far = 66 + 44 * fk;
   for (const material of world.ridgeMaterials) material.opacity = 1 - fk;
   const lighting = THREE.MathUtils.smoothstep(story.awakenT, .45, 3.6);
-  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, Math.max(lighting, story.wishGlow * .7));
+  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, lighting);
   renderer.toneMappingExposure = 1.05 + 0.08 * fk;
   renderer.info.reset();
   composer.render();

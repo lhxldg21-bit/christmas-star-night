@@ -77,8 +77,8 @@ export function buildWorld(scene, rand) {
   const world = { lamps: [], glowDecals: [] };
   const path = makePath();
   world.path = path;
-  const playSnow = path.curve.getPointAt(.305);
-  const bend = path.curve.getTangentAt(.305);
+  const playSnow = path.curve.getPointAt(.324);
+  const bend = path.curve.getTangentAt(.324);
   playSnow.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.28);
   const heightAt = makeHeightField(path, playSnow);
   world.playSnow = playSnow;

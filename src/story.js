@@ -83,12 +83,17 @@ export class Story {
     this.gateCueT = 0;
     this.playedInSnow = false;
     this.guideInView = false;
+    this.hasFollowedGuide = false;
+    this.snowSeenFor = 0;
+    this.wishPulse = 0;
     this.guideAim = new THREE.Vector3();
     this.gateStop = w.path.samples.at(-1).clone();
     this.gateStop.y = w.heightAt(this.gateStop.x, this.gateStop.z);
-    this.firstBend = w.path.curve.getPointAt(.274);
-    const bend = w.path.curve.getTangentAt(.274);
+    this.firstBend = w.path.curve.getPointAt(.296);
+    const bend = w.path.curve.getTangentAt(.296);
     this.firstBend.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), .84);
+    this.scoutRoute = [.105, .15, .195, .236, .269].map(t => w.path.curve.getPointAt(t));
+    this.scoutRoute.push(this.firstBend);
     this.reducedMotion = !this.auto && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.starState = 'ground';
     this.prints.clear();
@@ -124,7 +129,7 @@ export class Story {
       sitting: 1,
       gagT: -1,
       recoveryT: 0,
-      companionT: 0,
+      scoutIndex: 0,
       offerT: -1,
       offered: false,
     };
@@ -218,16 +223,11 @@ export class Story {
     }
     this._updatePlayer(dt);
     if (!this.playedInSnow && this.state === 'walk' && this.starState === 'carried' &&
-        this._progress(this.p.pos) >= .237) {
+        this._progress(this.p.pos) >= .245) {
       this.playedInSnow = true;
       this.state = 'gag';
-      this.f.mode = 'chase';
-      this.f.gagT = 0;
-      this.jumpFrom = this.f.pos.clone();
       this.p.target = null;
       this.route.length = 0;
-      this.lightOrigin = this.world.starPatch.position.clone();
-      this.lightEnd = this.world.playSnow;
     }
     this._updateFox(dt);
     if (this._atGate() && this.f.mode === 'arrive-sit') this.gateCueT += dt;
@@ -250,12 +250,18 @@ export class Story {
             this.p.target = this.starGroundPos.clone().add(new THREE.Vector3(.20, 0, 1.28));
         } else if (this.starState === 'carried') {
           const progress = this._progress(this.p.pos);
-          if (!this._atGate()) this._followRoute(Math.min(this.playedInSnow ? 1 : .25, progress + .18));
+          if (!this._atGate()) {
+            if (this.playedInSnow) this.hasFollowedGuide = true;
+            this._followRoute(Math.min(this.playedInSnow ? 1 : .25, progress + .18));
+          }
         }
         break;
       }
       case 'route':
-        if (this.state === 'walk' && this.starState === 'carried') this._followRoute(it.progress);
+        if (this.state === 'walk' && this.starState === 'carried') {
+          if (this.playedInSnow) this.hasFollowedGuide = true;
+          this._followRoute(it.progress);
+        }
         break;
       case 'pickup':
         if (this.state !== 'walk' || this.starState !== 'ground') break;
@@ -297,23 +303,15 @@ export class Story {
           this.wishing = false;
           this.wishReady = true;
           this.wishGlow = Math.max(.34, this.wishGlow);
+          this.wishPulse = 1.15;
           this.audio.chime();
-        }
-        break;
-      case 'climb':
-        if (this._atGate() && this.wishReady) {
-          this.route.length = 0;
-          this.state = 'approach-base';
-          this.p.target = this.placeSpot.clone();
         }
         break;
       case 'place':
         if (this.canPlace()) {
-          this.state = 'placing';
-          this.starState = 'placing';
-          this.placeT = 0;
-          this.placeFrom = this.star.position.clone();
-          this.audio.placeStar();
+          this.route.length = 0;
+          this.state = 'approach-base';
+          this.p.target = this.placeSpot.clone();
         }
         break;
       case 'foxTap':
@@ -338,7 +336,7 @@ export class Story {
 
   canWish() { return this._atGate() && this.gateCueT > .65 && !this.wishReady; }
 
-  canPlace() { return this.state === 'platform' && this.starState === 'carried'; }
+  canPlace() { return this._atGate() && this.wishReady; }
 
   _haptic(ms) {
     if (!this.auto && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(ms);
@@ -386,7 +384,11 @@ export class Story {
       p.idleTime += dt;
     }
     if (this.state === 'approach-base' && !p.target) {
-      this.state = 'platform';
+      this.state = 'placing';
+      this.starState = 'placing';
+      this.placeT = 0;
+      this.placeFrom = this.star.position.clone();
+      this.audio.placeStar();
       p.yaw = Math.atan2(this.world.basePos.x - p.pos.x, this.world.basePos.z - p.pos.z);
     }
     p.pos.y = this.world.heightAt(p.pos.x, p.pos.z);
@@ -422,12 +424,33 @@ export class Story {
         f.offered = true;
       }
     } else if (f.mode === 'scoutFirstBend') {
-      target = this.firstBend;
-      speed = 3.3;
+      target = this.scoutRoute[f.scoutIndex];
+      speed = 3.15;
       f.sitting = Math.max(0, f.sitting - dt * 7);
-      if (f.pos.distanceTo(target) < .22) {
-        f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
-        target = null;
+      if (Math.hypot(f.pos.x - target.x, f.pos.z - target.z) < .14) {
+        f.scoutIndex++;
+        target = this.scoutRoute[f.scoutIndex];
+        if (!target) {
+          this.snowPlayFrom = f.pos.clone();
+          f.mode = 'snowPlay';
+          f.gagT = 0;
+        }
+      }
+    } else if (f.mode === 'snowPlay') {
+      f.gagT += dt;
+      const cycle = (f.gagT % 1.55) / 1.55;
+      const dip = THREE.MathUtils.smoothstep(cycle, .12, .39) *
+        (1 - THREE.MathUtils.smoothstep(cycle, .61, .93));
+      f.pos.lerpVectors(this.snowPlayFrom, this.world.playSnow, dip * .83);
+      f.yaw = dampAngle(f.yaw, Math.atan2(this.world.playSnow.x - this.snowPlayFrom.x,
+        this.world.playSnow.z - this.snowPlayFrom.z), 8, dt);
+      if (this.state === 'gag') {
+        this.snowSeenFor += dt;
+        if (this.snowSeenFor >= 1.42) {
+          f.mode = 'peek';
+          f.gagT = 0;
+          this.paws.spawn(f.pos.x, f.pos.z, f.yaw);
+        }
       }
     } else if (f.mode === 'lead' || f.mode === 'waitAhead') {
       const progress = this._progress(this.p.pos);
@@ -435,30 +458,17 @@ export class Story {
       if (progress > .91) {
         f.mode = 'arrive';
         target = this.world.gateFox;
-      } else if (f.mode === 'waitAhead' && distance > 1.85 && !this.p.target) {
+      } else if (f.mode === 'waitAhead' && distance > 2.15 && !this.p.target) {
         f.sitting = Math.min(1, f.sitting + dt * 3);
         f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
       } else {
-        const ahead = Math.min(.965, progress + .064);
+        const ahead = Math.min(.965, progress + .092);
         target = path.curve.getPointAt(ahead);
         const tangent = path.curve.getTangentAt(ahead);
         target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .64);
-        speed = distance > 3.1 ? .93 : 1.96;
+        speed = distance > 4.3 ? 1.1 : 1.96;
         f.sitting = Math.max(0, f.sitting - dt * 5);
-        f.mode = !this.p.target && distance > 2.05 && f.pos.distanceTo(target) < .58 ? 'waitAhead' : 'lead';
-      }
-    } else if (f.mode === 'chase') {
-      f.gagT += dt;
-      f.sitting = 0;
-
-      const jump = THREE.MathUtils.smoothstep(f.gagT, .78, 1.72);
-      f.pos.lerpVectors(this.jumpFrom, this.lightEnd, jump);
-      f.yaw = dampAngle(f.yaw, Math.atan2(this.lightEnd.x - this.jumpFrom.x, this.lightEnd.z - this.jumpFrom.z), 5, dt);
-      if (f.gagT >= 1.72) {
-        f.mode = 'peek';
-        f.gagT = 0;
-        this.paws.spawn(f.pos.x, f.pos.z, f.yaw);
-        this.audio.footstep('fox', f.pos.distanceTo(this.p.pos));
+        f.mode = !this.p.target && distance > 2.65 && f.pos.distanceTo(target) < .58 ? 'waitAhead' : 'lead';
       }
     } else if (f.mode === 'peek') {
       f.gagT += dt;
@@ -470,7 +480,7 @@ export class Story {
       }
     } else if (f.mode === 'comeback') {
       f.recoveryT += dt;
-      const t = Math.min(.98, this._progress(this.p.pos) + .067);
+      const t = Math.min(.98, this._progress(this.p.pos) + .084);
       target = path.curve.getPointAt(t);
       const tangent = path.curve.getTangentAt(t);
       target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .83);
@@ -546,10 +556,15 @@ export class Story {
       const dip = Math.sin(Math.PI * f.offerT / 1.1);
       head.position.y -= dip * .11;
       head.rotation.z -= dip * .25;
-    } else if (f.mode === 'chase') {
-      const spring = Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, .78, 1.72));
-      g.position.y += spring * .26;
-      head.rotation.z -= .15 * (1 - spring);
+    } else if (f.mode === 'snowPlay') {
+      const cycle = (f.gagT % 1.55) / 1.55;
+      const hop = Math.sin(Math.PI * THREE.MathUtils.smoothstep(cycle, .08, .37));
+      const dig = THREE.MathUtils.smoothstep(cycle, .28, .43) * (1 - THREE.MathUtils.smoothstep(cycle, .7, .94));
+      g.position.y += hop * .19;
+      g.rotation.z = -.22 * dig;
+      head.position.y -= .1 * dig;
+      head.rotation.z -= .29 * dig;
+      for (let i = 0; i < 2; i++) this.fox.parts.legs[i].rotation.z += Math.sin(f.gagT * 28 + i * Math.PI) * .72 * dig;
     } else if (f.mode === 'peek') {
       const shake = THREE.MathUtils.smoothstep(f.gagT, .42, .57) * (1 - THREE.MathUtils.smoothstep(f.gagT, .91, 1.12));
       head.rotation.y += Math.sin(f.gagT * 27) * .42 * shake;
@@ -559,9 +574,10 @@ export class Story {
     }
     this.fox.parts.noseSnow.visible = (f.mode === 'peek' && f.gagT < .85);
     for (const puff of this.fox.parts.snowPuffs) {
-      puff.visible = f.mode === 'peek' && f.gagT < .78;
+      const snowT = f.mode === 'snowPlay' ? (f.gagT % 1.55) - .48 : f.gagT;
+      puff.visible = (f.mode === 'peek' || f.mode === 'snowPlay') && snowT >= 0 && snowT < .56;
       if (!puff.visible) continue;
-      const t = f.gagT / .78, a = puff.userData.angle;
+      const t = snowT / .56, a = puff.userData.angle;
       puff.position.set(Math.cos(a) * t * .64, .18 + Math.sin(Math.PI * t) * .42, Math.sin(a) * t * .64);
       puff.scale.setScalar(1 - .8 * t);
     }
@@ -588,6 +604,26 @@ export class Story {
     if (this.wishing) this.wishGlow = Math.min(1, this.wishGlow + dt / 1.6);
     else if (this.state === 'walk' && !this.wishReady) this.wishGlow = Math.max(0, this.wishGlow - dt * 2.4);
     const charge = THREE.MathUtils.smoothstep(this.wishGlow, 0, 1);
+    this.wishPulse = Math.max(0, this.wishPulse - dt);
+    const pulse = this.wishPulse / 1.15;
+    const showWish = this.wishing || pulse > 0;
+    ud.ring.visible = showWish;
+    if (showWish) {
+      const breathe = .94 + .06 * Math.sin(tt * 5);
+      ud.ring.scale.setScalar(this.wishing ? .87 + .29 * charge : 1.08 + (1 - pulse) * 1.12);
+      ud.ring.material.opacity = this.wishing ? (.16 + .58 * charge) * breathe : pulse * pulse * .72;
+      ud.ring.material.rotation = tt * .42;
+    }
+    for (let i = 0; i < ud.sparks.length; i++) {
+      const spark = ud.sparks[i];
+      spark.visible = showWish && (pulse > 0 || this.wishGlow > i / 13);
+      if (!spark.visible) continue;
+      const angle = i * Math.PI * 2 / ud.sparks.length + tt * (this.wishing ? 1.9 : .65);
+      const radius = this.wishing ? .55 - charge * .12 : .46 + (1 - pulse) * .63;
+      spark.position.set(radius * Math.cos(angle), radius * Math.sin(angle), .13 + .12 * Math.sin(angle * 2));
+      spark.material.opacity = this.wishing ? .84 : pulse;
+      spark.scale.setScalar(.65 + .35 * Math.sin(tt * 9 + i));
+    }
     const lantern = this.starState === 'carried';
     if (lantern && this.camInit) {
       const side = new THREE.Vector3(-this.carryForward.z, 0, this.carryForward.x).normalize();
@@ -604,8 +640,7 @@ export class Story {
       const step = Math.min(.96, this._progress(this.p.pos) + .06);
       const destination = this.world.path.curve.getPointAt(step);
       if (this.state === 'gag' && this.f.mode !== 'comeback') {
-        destination.copy(this.lightOrigin).lerp(this.lightEnd,
-          this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, 0, .85) : 1);
+        destination.copy(this.world.playSnow);
       }
       patch.position.lerp(destination, 1 - Math.exp(-5 * dt));
       const bankDistance = Math.hypot(patch.position.x - this.world.playSnow.x, patch.position.z - this.world.playSnow.z);
@@ -613,9 +648,9 @@ export class Story {
         .035 * (1 - THREE.MathUtils.smoothstep(bankDistance, .12, 1.1));
       patch.material.opacity = .24 + charge * .19;
     }
-    s.userData.halo.material.opacity = this.starState === 'placed' ? .65 : (lantern ? .2 + charge * .46 : .12);
+    s.userData.halo.material.opacity = this.starState === 'placed' ? .65 : (lantern ? .19 + charge * .25 : .12);
     s.userData.star.material.emissiveIntensity = this.starState === 'placed' ? 1.12 :
-      (this.starState === 'carried' ? .85 + charge * 1.18 : .8);
+      (this.starState === 'carried' ? .85 + charge * .68 : .8);
     if (this.starState === 'ground') {
       L.intensity = 1.4;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
@@ -626,12 +661,11 @@ export class Story {
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
-      L.intensity += (0.65 + charge * 2.25 - L.intensity) * Math.min(1, 4 * dt);
+      L.intensity += (0.65 + charge * 1.18 - L.intensity) * Math.min(1, 4 * dt);
       const goal = this.inspect.anchor;
       s.position.lerp(goal, 1 - Math.exp(-6 * dt));
-      const sweep = this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, .30, 1.4) : 1;
-      s.rotation.y = Math.atan2(this.camPos.x-s.position.x,this.camPos.z-s.position.z) + this.inspect.yaw * (1 - sweep) - sweep * .64;
-      s.rotation.x = this.inspect.pitch * (1 - sweep) + sweep * .21;
+      s.rotation.y = Math.atan2(this.camPos.x - s.position.x, this.camPos.z - s.position.z) - .5;
+      s.rotation.x = .18;
     } else if (this.starState === 'placed') {
       L.intensity += (1.6 - L.intensity) * Math.min(1, 3 * dt);
       s.position.y = this.world.baseTop.y;
@@ -737,7 +771,7 @@ export class Story {
     const segment = samples[j].clone().sub(samples[i]);
     const along = THREE.MathUtils.clamp(p.clone().sub(samples[i]).dot(segment) / segment.lengthSq(), 0, 1);
     const pr = (i + along * (j - i)) / 120;
-    if (['approach-base', 'platform', 'placing', 'awakening', 'finale', 'letter'].includes(this.state)) {
+    if (['approach-base', 'placing', 'awakening', 'finale', 'letter'].includes(this.state)) {
       goalLook = this.world.baseTop.clone().add(new THREE.Vector3(0, -.32, 0));
       if (this.state === 'placing') goalLook.lerp(this.star.position, .50);
       if (['awakening', 'finale', 'letter'].includes(this.state)) {
@@ -810,22 +844,20 @@ export class Story {
     if (!this.ui) return;
     this.ui.setPrompt(
       this.state === 'walk' && !this.p.target && this.f.offered && nearStar ? '拾起星星' :
-      this.canWish() ? '长按许愿' : nearBase && this.wishReady ? '走到台上' :
-      this.canPlace() ? '安放星星' : null,
+      this.canWish() ? '长按星星许愿' : this.canPlace() ? '上台安放星星' : null,
     );
     const flipped = this.flippedOnce && Math.abs(Math.sin(this.inspect.yaw / 2)) > .7;
     this.ui.setInspect(this.state === 'inspect', this.config, flipped, this.flippedOnce);
     const foxAhead = this._progress(this.f.pos) - this._progress(this.p.pos) > .034;
     const journeyLabel = this.starState === 'ground' ? '走近星星'
-      : this.f.mode === 'scoutFirstBend' ? '沿雪路走到拐角'
-      : this.guideInView && foxAhead ? '跟上小狐狸'
-      : this._progress(this.p.pos) > .81 ? '走到台阶前' : '沿着爪印走';
+      : !this.playedInSnow ? '沿雪路走到拐角'
+      : !this.hasFollowedGuide && this.guideInView && foxAhead ? '跟上小狐狸'
+      : this._progress(this.p.pos) > .81 ? '走到台阶前' : this.guideInView ? '继续走' : '沿着爪印走';
     this.ui.setJourney(
-      this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > .25,
+      this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > (this.hasFollowedGuide ? 1.85 : .3),
       journeyLabel,
     );
     this.ui.setNameKicker(this.nameKickerT >= 0 && this.nameKickerT < 2.2 ? this.config.toName : null);
-    this.ui.setWishCharge(this.wishing, this.wishGlow);
     this.ui.setToast(this.time < this.toastUntil ? this.config.walkLine : null);
   }
 }
@@ -846,7 +878,6 @@ function buildAutoScript() {
     {t:12,intent:{type:'continue'}}, route(14,.25),
     route(27,.43),route(34,.60),route(41,.75),route(47,.88),route(53,1),
     {t:59,intent:{type:'wish',active:true}},
-    {t:61,intent:{type:'finish-wish'}},{t:62,intent:{type:'climb'}},
-    {t:66,intent:{type:'place'}},
+    {t:61,intent:{type:'finish-wish'}},{t:64,intent:{type:'place'}},
   ];
 }
