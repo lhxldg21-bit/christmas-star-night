@@ -77,9 +77,9 @@ export function buildWorld(scene, rand) {
   const world = { lamps: [], glowDecals: [] };
   const path = makePath();
   world.path = path;
-  const playSnow = path.curve.getPointAt(.249);
-  const bend = path.curve.getTangentAt(.249);
-  playSnow.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.40);
+  const playSnow = path.curve.getPointAt(.305);
+  const bend = path.curve.getTangentAt(.305);
+  playSnow.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), 1.28);
   const heightAt = makeHeightField(path, playSnow);
   world.playSnow = playSnow;
   world.heightAt = heightAt;
@@ -272,6 +272,10 @@ function buildPines(scene, world, rand, heightAt, path) {
     {x:-4,z:-34,s:2.15,rot:.4}, {x:1,z:-38,s:1.85,rot:.75}, {x:5,z:-35,s:2.35,rot:1.9},
     {x:-8,z:-33,s:2.45,rot:2.6}, {x:8,z:-39,s:3,rot:1.2}
   ];
+  const hideTree = path.curve.getPointAt(.21);
+  const hideTangent = path.curve.getTangentAt(.21);
+  hideTree.addScaledVector(new THREE.Vector3(-hideTangent.z, 0, hideTangent.x), 1.58);
+  placements.push({x: hideTree.x, z: hideTree.z, s: 1.78, rot: .38, bendScreen: true});
   // Hero pines create successive "gates" without closing the walk corridor.
   for (const [t, side, s, tilt] of [
     [.19, -1, 1.22, .12], [.29, 1, 1.8, -.08],
@@ -311,7 +315,7 @@ function buildPines(scene, world, rand, heightAt, path) {
     // Keep the entire canopy clear of the travelling camera corridor.
     let nearest=path.samples[0], d=Infinity;
     for(const pt of path.samples){const dd=Math.hypot(p.x-pt.x,p.z-pt.z);if(dd<d){d=dd;nearest=pt;}}
-    const clear=p.hero ? 3.7 : 4.65+p.s*.16;
+    const clear=p.bendScreen ? 1.58 : p.hero ? 3.7 : 4.65+p.s*.16;
     if(d<clear){p.x=nearest.x+(p.x-nearest.x)/d*clear;p.z=nearest.z+(p.z-nearest.z)/d*clear;}
     const y = heightAt(p.x, p.z) - 0.05;
     q.setFromAxisAngle(v.set(0, 1, 0), p.rot);
@@ -361,7 +365,7 @@ function buildLamps(scene, world, path, heightAt) {
     const t = 0.26 + i * 0.137;
     const p = path.curve.getPointAt(Math.min(t, 0.97));
     const tangent = path.curve.getTangentAt(Math.min(t, 0.97));
-    const side = new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(i % 2 === 0 ? 2.7 : -2.15);
+    const side = new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(i % 2 === 0 ? 3.25 : -2.5);
     const x = p.x + side.x, z = p.z + side.z;
     const y = heightAt(x, z);
     const g = new THREE.Group();
@@ -441,9 +445,8 @@ function buildCourtyard(scene, world, heightAt) {
   const wallMat = mat(0xaab3be);
   const wallGeo = new THREE.BoxGeometry(1.32, 0.58, 0.42);
   const cx = 0.2, cz = -28.2;
-  const lowLight = new THREE.Vector3(cx + .62, heightAt(cx + .62, cz + 1.72), cz + 1.72);
-  world.courtyardLantern = makeLowLantern(g, lowLight);
-  world.lanternFox = lowLight.clone().add(new THREE.Vector3(.41, 0, -.12));
+  const foxX = cx + .88, foxZ = cz + 2.74;
+  world.gateFox = new THREE.Vector3(foxX, heightAt(foxX, foxZ), foxZ);
   for (let i = 0; i < 12; i++) {
     const a = Math.PI * (0.10 + (i / 11) * 0.80); // 朝北半弧，开口向南（来路）
     const x = cx + Math.cos(a) * 4.75;

@@ -46,13 +46,13 @@ export class UI {
 
   _buildPrompt() {
     this.prompt = this._el('button', 'prompt hide');
-    this.wishHint = this._el('div', 'wish-hint hide', null, '可按住许愿，松开放上星星');
+    this.wishHint = this._el('div', 'wish-hint hide', null, '松手收好愿望，也可以轻点');
     this.wishHint.id = 'wish-hint';
     this.wishMeter = this._el('div', 'wish-meter hide');
     this.wishMeter.setAttribute('aria-hidden', 'true');
     this.wishFill = this._el('div', 'wish-fill', this.wishMeter);
     this.prompt.addEventListener('pointerdown', (event) => {
-      if (event.button === 0 && this._cache.prompt === '安放星星') {
+      if (event.button === 0 && this._cache.prompt === '长按许愿') {
         this.onIntent({ type: 'wish', active: true });
       }
     });
@@ -63,7 +63,8 @@ export class UI {
     this.prompt.addEventListener('click', () => {
       const label = this.prompt.textContent;
       if (label === '拾起星星') this.onIntent({ type: 'pickup' });
-      else if (label === '请狐狸点灯') this.onIntent({ type: 'light-lantern' });
+      else if (label === '长按许愿') this.onIntent({ type: 'finish-wish' });
+      else if (label === '走到台上') this.onIntent({ type: 'climb' });
       else if (label === '安放星星') this.onIntent({ type: 'place' });
     });
   }
@@ -241,7 +242,7 @@ export class UI {
     if (this._cache.prompt === label) return;
     this._cache.prompt = label;
     if (label) this.prompt.textContent = label;
-    const canWish = label === '安放星星';
+    const canWish = label === '长按许愿';
     this._toggle(this.wishHint, canWish);
     if (canWish) this.prompt.setAttribute('aria-describedby', this.wishHint.id);
     else this.prompt.removeAttribute('aria-describedby');

@@ -78,16 +78,16 @@ export class Story {
     this.world.starPatch.visible = false;
     this.world.starPatch.position.copy(w.path.curve.getPointAt(.12));
     this.world.setChristmasLights(0);
-    this.world.courtyardLantern.setGlow(0);
-    this.lanternT = -1;
+    this.wantPickup = false;
+    this.wishReady = false;
+    this.gateCueT = 0;
     this.playedInSnow = false;
-    this.bendReunion = false;
     this.guideInView = false;
     this.guideAim = new THREE.Vector3();
     this.gateStop = w.path.samples.at(-1).clone();
     this.gateStop.y = w.heightAt(this.gateStop.x, this.gateStop.z);
-    this.firstBend = w.path.curve.getPointAt(.237);
-    const bend = w.path.curve.getTangentAt(.237);
+    this.firstBend = w.path.curve.getPointAt(.274);
+    const bend = w.path.curve.getTangentAt(.274);
     this.firstBend.addScaledVector(new THREE.Vector3(-bend.z, 0, bend.x), .84);
     this.reducedMotion = !this.auto && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.starState = 'ground';
@@ -218,16 +218,21 @@ export class Story {
     }
     this._updatePlayer(dt);
     if (!this.playedInSnow && this.state === 'walk' && this.starState === 'carried' &&
-        this._progress(this.p.pos) >= .183) {
+        this._progress(this.p.pos) >= .237) {
       this.playedInSnow = true;
       this.state = 'gag';
       this.f.mode = 'chase';
       this.f.gagT = 0;
       this.jumpFrom = this.f.pos.clone();
+      this.p.target = null;
+      this.route.length = 0;
       this.lightOrigin = this.world.starPatch.position.clone();
       this.lightEnd = this.world.playSnow;
     }
     this._updateFox(dt);
+    if (this._atGate() && this.f.mode === 'arrive-sit') this.gateCueT += dt;
+    if (this.wantPickup && this.f.offered && !this.p.target && this.state === 'walk')
+      this._handleIntent({ type: 'pickup' });
     this._updateStar(dt);
     this._updateBeats(dt);
     this._syncUi();
@@ -245,7 +250,7 @@ export class Story {
             this.p.target = this.starGroundPos.clone().add(new THREE.Vector3(.20, 0, 1.28));
         } else if (this.starState === 'carried') {
           const progress = this._progress(this.p.pos);
-          if (!this._atGate()) this._followRoute(Math.min(1, progress + .18));
+          if (!this._atGate()) this._followRoute(Math.min(this.playedInSnow ? 1 : .25, progress + .18));
         }
         break;
       }
@@ -253,8 +258,15 @@ export class Story {
         if (this.state === 'walk' && this.starState === 'carried') this._followRoute(it.progress);
         break;
       case 'pickup':
+        if (this.state !== 'walk' || this.starState !== 'ground') break;
+        this.wantPickup = true;
+        if (!this.p.target && this.p.pos.distanceTo(this.starGroundPos) >= 2.2) {
+          this._handleIntent({ type: 'advance' });
+          break;
+        }
         if (this.state === 'walk' && !this.p.target && this.f.offered && this.starState === 'ground' &&
             this.p.pos.distanceTo(this.starGroundPos) < 2.2) {
+          this.wantPickup = false;
           this.state = 'pickup';
           this.starState = 'pickup';
           this.pickupT = 0;
@@ -277,29 +289,35 @@ export class Story {
           this.audio.setLayer(1);
         }
         break;
-      case 'light-lantern':
-        if (this.canLightLantern()) {
-          this.lanternT = 0;
-          this.f.mode = 'light-lantern';
+      case 'wish':
+        this.wishing = it.active && this.canWish();
+        break;
+      case 'finish-wish':
+        if (this.canWish()) {
+          this.wishing = false;
+          this.wishReady = true;
+          this.wishGlow = Math.max(.34, this.wishGlow);
+          this.audio.chime();
         }
         break;
-      case 'wish':
-        this.wishing = it.active && this.canPlace();
-        break;
-      case 'place':
-        if (this.canPlace()) {
-          this.wishing = false;
+      case 'climb':
+        if (this._atGate() && this.wishReady) {
           this.route.length = 0;
           this.state = 'approach-base';
           this.p.target = this.placeSpot.clone();
         }
         break;
+      case 'place':
+        if (this.canPlace()) {
+          this.state = 'placing';
+          this.starState = 'placing';
+          this.placeT = 0;
+          this.placeFrom = this.star.position.clone();
+          this.audio.placeStar();
+        }
+        break;
       case 'foxTap':
-        if (this.canLightLantern()) {
-          this._handleIntent({ type: 'light-lantern' });
-        } else if (this.f.mode === 'waitAtBend') {
-          this._meetAtBend();
-        } else if (this.foxReactT < 0) {
+        if (this.foxReactT < 0 && !this._atGate()) {
           this.foxReactT = 0;
           this.audio.chime();
           this._haptic(6);
@@ -318,16 +336,9 @@ export class Story {
       this.p.pos.distanceTo(this.gateStop) < .24;
   }
 
-  canLightLantern() { return this._atGate() && this.lanternT < 0 && this.f.mode === 'arrive-sit'; }
+  canWish() { return this._atGate() && this.gateCueT > .65 && !this.wishReady; }
 
-  canPlace() { return this._atGate() && this.lanternT >= 1.4; }
-
-  _meetAtBend() {
-    this.bendReunion = true;
-    this.f.mode = 'returnAtBend';
-    this.f.companionT = 0;
-    this.audio.chime();
-  }
+  canPlace() { return this.state === 'platform' && this.starState === 'carried'; }
 
   _haptic(ms) {
     if (!this.auto && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(ms);
@@ -375,12 +386,8 @@ export class Story {
       p.idleTime += dt;
     }
     if (this.state === 'approach-base' && !p.target) {
-      this.state = 'placing';
-      this.starState = 'placing';
-      this.placeT = 0;
-      this.placeFrom = p.pos.clone().add(new THREE.Vector3(0, 1.43 + this.world.stepHeight(p.pos), -.55));
+      this.state = 'platform';
       p.yaw = Math.atan2(this.world.basePos.x - p.pos.x, this.world.basePos.z - p.pos.z);
-      this.audio.placeStar();
     }
     p.pos.y = this.world.heightAt(p.pos.x, p.pos.z);
   }
@@ -388,7 +395,7 @@ export class Story {
   _updateFox(dt) {
     const f = this.f;
     const path = this.world.path;
-    const RUN = 2.7, WALK = 1.9;
+    const RUN = 2.7;
     let target = null, speed = RUN;
 
     if (f.mode === 'guard') {
@@ -422,49 +429,24 @@ export class Story {
         f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
         target = null;
       }
-    } else if (f.mode === 'lead') {
-      const playerProgress = this._progress(this.p.pos);
-      // Wait at the bend long enough for the player to catch up.
-      const leadLimit = !this.bendReunion && playerProgress < .52 ? .53 : .98;
-      const pr = Math.min(playerProgress + .083, leadLimit);
-      target = path.curve.getPointAt(pr);
-      const tangent = path.curve.getTangentAt(pr);
-      target.add(new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(.83));
-      if (playerProgress > .85) {
+    } else if (f.mode === 'lead' || f.mode === 'waitAhead') {
+      const progress = this._progress(this.p.pos);
+      const distance = f.pos.distanceTo(this.p.pos);
+      if (progress > .91) {
         f.mode = 'arrive';
-        target = this.world.lanternFox;
+        target = this.world.gateFox;
+      } else if (f.mode === 'waitAhead' && distance > 1.85 && !this.p.target) {
+        f.sitting = Math.min(1, f.sitting + dt * 3);
+        f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 4, dt);
+      } else {
+        const ahead = Math.min(.965, progress + .064);
+        target = path.curve.getPointAt(ahead);
+        const tangent = path.curve.getTangentAt(ahead);
+        target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .64);
+        speed = distance > 3.1 ? .93 : 1.96;
+        f.sitting = Math.max(0, f.sitting - dt * 5);
+        f.mode = !this.p.target && distance > 2.05 && f.pos.distanceTo(target) < .58 ? 'waitAhead' : 'lead';
       }
-      if (!this.bendReunion && playerProgress > .38 && playerProgress < .55 &&
-          f.pos.distanceTo(target) < .58) {
-        f.mode = 'waitAtBend';
-        f.companionT = 0;
-        this.audio.chime();
-      }
-      speed = 2.1;
-      f.sitting = Math.max(0, f.sitting - dt * 6);
-      const distToPlayer = f.pos.distanceTo(this.p.pos);
-      // Stay visible as a guide. If the player pauses, wait ahead instead of
-      // sprinting all the way back and making the scene feel stalled.
-      if (f.mode === 'lead' && this.p.idleTime > .55 && distToPlayer > 2.6 && f.pos.distanceTo(target) < .52) {
-        f.mode = 'waitAhead';
-      }
-    } else if (f.mode === 'waitAhead') {
-      f.sitting = Math.min(1, f.sitting + dt * 5);
-      f.moving = Math.max(0, f.moving - dt * 6);
-      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
-      if (this.p.target) f.mode = 'lead';
-    } else if (f.mode === 'waitAtBend') {
-      f.companionT += dt;
-      f.yaw = dampAngle(f.yaw, Math.atan2(this.p.pos.x - f.pos.x, this.p.pos.z - f.pos.z), 5, dt);
-      if (f.companionT > 1.85 || f.pos.distanceTo(this.p.pos) < 1.7) this._meetAtBend();
-    } else if (f.mode === 'returnAtBend') {
-      f.companionT += dt;
-      const progress = Math.min(.98, this._progress(this.p.pos) + .025);
-      target = path.curve.getPointAt(progress);
-      const tangent = path.curve.getTangentAt(progress);
-      target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), 1.15);
-      speed = 1.85;
-      if (f.companionT > 5) f.mode = 'lead';
     } else if (f.mode === 'chase') {
       f.gagT += dt;
       f.sitting = 0;
@@ -488,7 +470,7 @@ export class Story {
       }
     } else if (f.mode === 'comeback') {
       f.recoveryT += dt;
-      const t = Math.min(.98, this._progress(this.p.pos) + .083);
+      const t = Math.min(.98, this._progress(this.p.pos) + .067);
       target = path.curve.getPointAt(t);
       const tangent = path.curve.getTangentAt(t);
       target.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x), .83);
@@ -500,25 +482,9 @@ export class Story {
         this.toastUntil = this.time + 1.8;
       }
     } else if (f.mode === 'arrive') {
-      target = this.world.lanternFox;
+      target = this.world.gateFox;
       speed = RUN;
-      if (f.pos.distanceTo(target) < 0.3) {
-        f.mode = 'arrive-sit';
-      }
-    } else if (f.mode === 'light-lantern') {
-      target = this.world.lanternFox;
-      f.sitting = Math.max(0, f.sitting - dt * 5);
-      speed = 2.4;
-      if (f.pos.distanceTo(target) < .2) {
-        const lamp = this.world.courtyardLantern.position;
-        f.yaw = dampAngle(f.yaw, Math.atan2(lamp.x - f.pos.x, lamp.z - f.pos.z), 8, dt);
-        target = null;
-        const before = this.lanternT;
-        this.lanternT += dt;
-        if (before < .66 && this.lanternT >= .66) this.audio.lampPing(1);
-        this.world.courtyardLantern.setGlow(THREE.MathUtils.smoothstep(this.lanternT, .66, 1.4));
-        if (this.lanternT >= 1.4) f.mode = 'arrive-sit';
-      }
+      if (f.pos.distanceTo(target) < .23) f.mode = 'arrive-sit';
     } else if (f.mode === 'arrive-sit') {
       f.sitting = Math.min(1, f.sitting + dt * 4);
       f.moving = Math.max(0, f.moving - dt * 5);
@@ -569,9 +535,13 @@ export class Story {
       g.position.y += Math.sin(Math.PI * this.foxReactT / 0.9) * .18;
       this.fox.parts.tailPivot.rotation.y = Math.sin(this.foxReactT * 30) * .4;
     }
-    if (f.mode === 'light-lantern') {
-      head.rotation.y = 0;
-      head.rotation.z = -.21 * Math.sin(Math.PI * THREE.MathUtils.smoothstep(this.lanternT, .12, 1.22));
+    if (f.mode === 'arrive-sit') {
+      const indicate = THREE.MathUtils.smoothstep(this.gateCueT, .15, .62) *
+        (1 - THREE.MathUtils.smoothstep(this.gateCueT, 1.12, 2.05));
+      const slot = this.world.baseTop;
+      const towardSlot = Math.atan2(slot.x - f.pos.x, slot.z - f.pos.z);
+      head.rotation.y = dampAngle(head.rotation.y, towardSlot - f.yaw, 3, indicate * .18);
+      head.rotation.z += indicate * .43;
     } else if (f.mode === 'offer') {
       const dip = Math.sin(Math.PI * f.offerT / 1.1);
       head.position.y -= dip * .11;
@@ -581,11 +551,13 @@ export class Story {
       g.position.y += spring * .26;
       head.rotation.z -= .15 * (1 - spring);
     } else if (f.mode === 'peek') {
+      const shake = THREE.MathUtils.smoothstep(f.gagT, .42, .57) * (1 - THREE.MathUtils.smoothstep(f.gagT, .91, 1.12));
+      head.rotation.y += Math.sin(f.gagT * 27) * .42 * shake;
+      head.rotation.z += Math.cos(f.gagT * 27) * .17 * shake;
       g.position.y -= .09 * Math.sin(Math.PI * THREE.MathUtils.smoothstep(f.gagT, 0, .66));
       this.fox.parts.tailPivot.rotation.y = Math.sin(f.gagT * 12) * .28;
     }
-    this.fox.parts.noseSnow.visible = (f.mode === 'peek' && f.gagT > .50) || f.mode === 'comeback' ||
-      (f.mode === 'lead' && this.toastUntil - this.time > .7);
+    this.fox.parts.noseSnow.visible = (f.mode === 'peek' && f.gagT < .85);
     for (const puff of this.fox.parts.snowPuffs) {
       puff.visible = f.mode === 'peek' && f.gagT < .78;
       if (!puff.visible) continue;
@@ -614,7 +586,7 @@ export class Story {
     const view = focus.sub(this.p.pos).setY(0).normalize();
     const viewSide = new THREE.Vector3(-view.z, 0, view.x);
     if (this.wishing) this.wishGlow = Math.min(1, this.wishGlow + dt / 1.6);
-    else if (this.state === 'walk') this.wishGlow = Math.max(0, this.wishGlow - dt * 2.4);
+    else if (this.state === 'walk' && !this.wishReady) this.wishGlow = Math.max(0, this.wishGlow - dt * 2.4);
     const charge = THREE.MathUtils.smoothstep(this.wishGlow, 0, 1);
     const lantern = this.starState === 'carried';
     if (lantern && this.camInit) {
@@ -643,7 +615,7 @@ export class Story {
     }
     s.userData.halo.material.opacity = this.starState === 'placed' ? .65 : (lantern ? .2 + charge * .46 : .12);
     s.userData.star.material.emissiveIntensity = this.starState === 'placed' ? 1.12 :
-      (this.starState === 'carried' ? .85 + charge * 1.6 : .8);
+      (this.starState === 'carried' ? .85 + charge * 1.18 : .8);
     if (this.starState === 'ground') {
       L.intensity = 1.4;
       s.position.y = this.starGroundPos.y + Math.sin(this.time * 1.8) * 0.04;
@@ -654,7 +626,7 @@ export class Story {
       s.rotation.x += (this.inspect.pitch - s.rotation.x) * Math.min(1, 10 * dt);
       s.rotation.z *= 1 - Math.min(1, 8 * dt);
     } else if (this.starState === 'carried') {
-      L.intensity += (0.65 + charge * 3.1 - L.intensity) * Math.min(1, 4 * dt);
+      L.intensity += (0.65 + charge * 2.25 - L.intensity) * Math.min(1, 4 * dt);
       const goal = this.inspect.anchor;
       s.position.lerp(goal, 1 - Math.exp(-6 * dt));
       const sweep = this.f.mode === 'chase' ? THREE.MathUtils.smoothstep(this.f.gagT, .30, 1.4) : 1;
@@ -765,7 +737,7 @@ export class Story {
     const segment = samples[j].clone().sub(samples[i]);
     const along = THREE.MathUtils.clamp(p.clone().sub(samples[i]).dot(segment) / segment.lengthSq(), 0, 1);
     const pr = (i + along * (j - i)) / 120;
-    if (['approach-base', 'placing', 'awakening', 'finale', 'letter'].includes(this.state)) {
+    if (['approach-base', 'platform', 'placing', 'awakening', 'finale', 'letter'].includes(this.state)) {
       goalLook = this.world.baseTop.clone().add(new THREE.Vector3(0, -.32, 0));
       if (this.state === 'placing') goalLook.lerp(this.star.position, .50);
       if (['awakening', 'finale', 'letter'].includes(this.state)) {
@@ -778,19 +750,16 @@ export class Story {
     } else if (this.starState === 'ground') {
       goalLook = this.starGroundPos.clone().lerp(this.f.pos, .36).add(new THREE.Vector3(0, .20, 0));
     } else {
-      goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .145))
-        .lerp(this.f.pos, .09).add(new THREE.Vector3(0, .88, 0));
-      goalLook.lerp(this.world.baseTop, .82 * THREE.MathUtils.smoothstep(pr, .83, 1));
+      goalLook = this.world.path.curve.getPointAt(Math.min(1, pr + .085)).add(new THREE.Vector3(0, .69, 0));
       if (this._atGate()) {
-        const lamp = this.world.courtyardLantern.position;
-        const reveal = THREE.MathUtils.smoothstep(this.lanternT, .85, 1.7);
-        goalLook.copy(lamp).lerp(this.world.lanternFox, .20);
-        goalLook.y = 1.16 + this.gateStop.y;
-        goalLook.lerp(this.world.baseTop, .88 * reveal);
-      } else if (this.state === 'walk' && ['scoutFirstBend', 'waitAhead', 'waitAtBend', 'returnAtBend'].includes(this.f.mode)) {
-        const focus = this.f.pos.clone().add(new THREE.Vector3(0, .4, 0));
+        const reveal = THREE.MathUtils.smoothstep(this.gateCueT, .45, 1.45);
+        goalLook.copy(this.world.gateFox).lerp(this.world.basePos, .38);
+        goalLook.y = 1.05 + this.gateStop.y;
+        goalLook.lerp(this.world.baseTop, .48 * reveal);
+      } else if (this.state === 'walk' && this.playedInSnow && ['lead', 'waitAhead', 'arrive', 'arrive-sit'].includes(this.f.mode)) {
+        const focus = this.f.pos.clone().add(new THREE.Vector3(0, .43, 0));
         const distance = this.f.pos.distanceTo(p);
-        goalLook.lerp(focus, .42 * THREE.MathUtils.smoothstep(distance, 1.2, 3.2));
+        goalLook.lerp(focus, .65 * THREE.MathUtils.smoothstep(distance, 1.0, 2.3));
       }
       if (this.state === 'gag') {
         const playLook = this.f.pos.clone().lerp(this.world.playSnow, .40);
@@ -841,7 +810,8 @@ export class Story {
     if (!this.ui) return;
     this.ui.setPrompt(
       this.state === 'walk' && !this.p.target && this.f.offered && nearStar ? '拾起星星' :
-      this.canLightLantern() ? '请狐狸点灯' : this.canPlace() ? '安放星星' : null,
+      this.canWish() ? '长按许愿' : nearBase && this.wishReady ? '走到台上' :
+      this.canPlace() ? '安放星星' : null,
     );
     const flipped = this.flippedOnce && Math.abs(Math.sin(this.inspect.yaw / 2)) > .7;
     this.ui.setInspect(this.state === 'inspect', this.config, flipped, this.flippedOnce);
@@ -849,7 +819,7 @@ export class Story {
     const journeyLabel = this.starState === 'ground' ? '走近星星'
       : this.f.mode === 'scoutFirstBend' ? '沿雪路走到拐角'
       : this.guideInView && foxAhead ? '跟上小狐狸'
-      : this.f.mode === 'returnAtBend' ? '一起往前走' : '沿雪路向前';
+      : this._progress(this.p.pos) > .81 ? '走到台阶前' : '沿着爪印走';
     this.ui.setJourney(
       this.state==='walk' && !this.p.target && !nearStar && !nearBase && this.time >= this.toastUntil && this.p.idleTime > .25,
       journeyLabel,
@@ -873,9 +843,10 @@ function buildAutoScript() {
   return [
     {t:.4,intent:{type:'start'}},{t:2.1,intent:{type:'advance'}},
     {t:5.15,intent:{type:'pickup'}},{t:9,intent:{type:'flip'}},
-    {t:12,intent:{type:'continue'}}, route(14,.22),
-    route(26,.43),route(34,.60),route(41,.75),route(47,.88),route(53,1),
-    {t:59,intent:{type:'light-lantern'}},
-    {t:62,intent:{type:'wish',active:true}},{t:64,intent:{type:'place'}},
+    {t:12,intent:{type:'continue'}}, route(14,.25),
+    route(27,.43),route(34,.60),route(41,.75),route(47,.88),route(53,1),
+    {t:59,intent:{type:'wish',active:true}},
+    {t:61,intent:{type:'finish-wish'}},{t:62,intent:{type:'climb'}},
+    {t:66,intent:{type:'place'}},
   ];
 }

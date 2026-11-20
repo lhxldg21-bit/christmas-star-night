@@ -211,8 +211,14 @@ export function buildFox() {
 
   const collar = new THREE.Mesh(new THREE.TorusGeometry(.135, .026, 6, 14), mat(PALETTE.berry));
   collar.rotation.y = Math.PI / 2;
-  const bell = new THREE.Mesh(new THREE.SphereGeometry(.032, 7, 5), mat(0xd7b36c, { emissive: 0x6b5320, emissiveIntensity: .2 }));
-  bell.position.set(.11, .245, 0);
+  const pendant = new THREE.Group();
+  pendant.position.x = .293;
+  const clasp = new THREE.Mesh(new THREE.CylinderGeometry(.009, .009, .065, 5), mat(PALETTE.berry));
+  clasp.position.y = .052;
+  const bell = new THREE.Mesh(new THREE.SphereGeometry(.042, 9, 7),
+    mat(0xf8bf62, { emissive: 0xb27127, emissiveIntensity: .35 }));
+  pendant.add(clasp, bell);
+  collar.position.x = .211;
 
   const headPivot = new THREE.Group();
   headPivot.position.set(0.3, 0.42, 0);
@@ -224,15 +230,26 @@ export function buildFox() {
   snout.scale.set(.62, 1.04, 1.32); snout.rotation.z = -Math.PI / 2; snout.position.set(0.135, -0.044, 0);
   const nose = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), mat(0x2d2430));
   nose.position.set(.225, -.023, 0);
-  const earL = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.18, 4), rust);
+  // Split the ear face into an outer rim and an inset color on the same surface.
+  const earGeo = new THREE.BufferGeometry();
+  const earVertices = [
+    [.05, -.047, -.073], [.05, -.047, .073], [.008, .165, 0],
+    [.040, -.018, -.046], [.040, -.018, .046], [.016, .105, 0], [-.098, -.047, 0],
+  ];
+  earGeo.setAttribute('position', new THREE.Float32BufferAttribute(earVertices.flat(), 3));
+  earGeo.setIndex([0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 2, 0, 3, 2, 3, 5,
+    0, 6, 1, 1, 6, 2, 2, 6, 0, 3, 4, 5]);
+  earGeo.addGroup(0, 27, 0);
+  earGeo.addGroup(27, 3, 1);
+  earGeo.computeVertexNormals();
+  const earL = new THREE.Mesh(earGeo, [rust, mat(0xd88b7a, { side: THREE.DoubleSide })]);
+  earL.material = [rust.clone(), earL.material[1]];
+  earL.material[0].side = THREE.DoubleSide;
   const earR = earL.clone();
-  earL.position.set(-0.03, 0.16, -0.085);
-  earR.position.set(-0.03, 0.16, 0.085);
+  earL.position.set(-.026, .123, -.108);
+  earR.position.set(-.026, .123, .108);
   const eyes = [], shines = [], ears = [earL, earR];
   for (const side of [-1, 1]) {
-    const lining = new THREE.Mesh(new THREE.ConeGeometry(.046, .127, 3), mat(0xe4a098));
-    lining.position.set(.013, .176, side * .081);
-    headPivot.add(lining);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(.025, 12, 8), mat(0x202b36));
     eye.scale.set(.90, 1.10, .83); eye.position.set(.128, .035, side * .117);
     headPivot.add(eye); eyes.push(eye);
@@ -275,7 +292,7 @@ export function buildFox() {
     legs.push(leg); g.add(leg);
   }
   collar.position.y = .31;
-  g.add(body, chest, collar, bell, headPivot, tailPivot);
+  g.add(body, chest, collar, pendant, headPivot, tailPivot);
   return {
     group: g,
     parts: { body, headPivot, tailPivot, legs, snowPuffs, noseSnow, eyes, shines, ears, bell },
@@ -293,7 +310,8 @@ export function buildFox() {
       body.rotation.z = sitting * .19;
       chest.position.y = .3 + bob - sitting * .04;
       collar.position.y = .31 + bob - sitting * .04;
-      bell.position.y = .245 + bob - sitting * .04;
+      pendant.position.y = .202 + bob - sitting * .035;
+      pendant.rotation.x = Math.sin(phase) * .24 * moving;
       headPivot.position.y = .42 + bob * .4 - sitting * .02 + Math.sin(t * 1.8) * .006;
       headPivot.rotation.z = sitting * 0.12;
       headPivot.rotation.y = 0;

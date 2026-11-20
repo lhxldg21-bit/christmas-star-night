@@ -6,7 +6,7 @@ const DEFAULTS = {
   fromName: 'sii',
   note: '我托这只小狐狸来接你。它第一次送这么重要的礼物，可能比我还紧张。',
   starText: '今晚的星星，只为你一个人亮。',
-  walkLine: '……抱歉，它平常不这样。',
+  walkLine: '抱歉，他平时不这样。',
   activity: '一起去吃火锅',
   letter:
     '嘿，终于等到你走到这里。\n' +

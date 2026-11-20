@@ -166,23 +166,29 @@ const clamp = THREE.MathUtils.clamp;
 const rad = THREE.MathUtils.degToRad;
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
+const starScreen = new THREE.Vector3();
 function pickAt(clientX, clientY) {
   const rect = surface.getBoundingClientRect();
   ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
-  if (story.canLightLantern() && raycaster.intersectObject(world.courtyardLantern.bulb).length) return 'lantern';
-  if (raycaster.intersectObject(star.userData.star).length) return 'star';
+  if (story.starState === 'ground' || story.canWish() || story.canPlace()) {
+    starScreen.copy(star.position).project(camera);
+    const dx = (starScreen.x - ndc.x) * rect.width / 2;
+    const dy = (starScreen.y - ndc.y) * rect.height / 2;
+    if (raycaster.intersectObject(star.userData.star).length ||
+        (starScreen.z > -1 && starScreen.z < 1 && Math.hypot(dx, dy) <= 32)) return 'star';
+  }
   if (raycaster.intersectObject(fox.group, true).length) return 'fox';
   return null;
 }
 surface.addEventListener('pointerdown', (event) => {
-  if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect'].includes(story.state)) return;
+  if (!event.isPrimary || event.button !== 0 || !['walk', 'inspect', 'platform'].includes(story.state)) return;
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, dragged: false,
     mode: story.state, t: performance.now(), yaw: story.look.yaw, pitch: story.look.pitch,
     starYaw: story.inspect.yaw, starPitch: story.inspect.pitch };
-  if (story.state === 'walk') {
+  if (story.state !== 'inspect') {
     pointer.hit = pickAt(event.clientX, event.clientY);
-    pointer.wish = pointer.hit === 'star' && story.canPlace();
+    pointer.wish = pointer.hit === 'star' && story.canWish();
     if (pointer.wish) story.queueIntent({type: 'wish', active: true});
   }
   story.lookActive = true;
@@ -212,12 +218,12 @@ surface.addEventListener('pointerup', (event) => {
   story.lookActive = false;
   const quick = !pointer.dragged && (performance.now() - pointer.t < 200);
   if (pointer.wish) {
-    story.queueIntent({type: 'wish', active: false});
-    if (!pointer.dragged) story.queueIntent({type: 'place'});
-  } else if (quick && pointer.mode === 'walk' && story.state === 'walk') {
-    const hit = pickAt(event.clientX, event.clientY);
+    story.queueIntent({type: 'finish-wish'});
+  } else if ((quick || (!pointer.dragged && pointer.hit === 'star')) &&
+      story.state === pointer.mode && pointer.mode !== 'inspect') {
+    const hit = pointer.hit || pickAt(event.clientX, event.clientY);
     if (hit === 'star' && story.starState === 'ground') story.queueIntent({ type: 'pickup' });
-    else if (hit === 'lantern') story.queueIntent({ type: 'light-lantern' });
+    else if (hit === 'star' && story.canPlace()) story.queueIntent({ type: 'place' });
     else if (hit === 'fox') story.queueIntent({ type: 'foxTap' });
     else story.queueIntent({ type: 'advance' });
   }
@@ -256,7 +262,7 @@ function draw() {
   scene.fog.far = 66 + 44 * fk;
   for (const material of world.ridgeMaterials) material.opacity = 1 - fk;
   const lighting = THREE.MathUtils.smoothstep(story.awakenT, .45, 3.6);
-  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, Math.max(lighting, story.wishGlow * .85));
+  bloomPass.strength = THREE.MathUtils.lerp(.19, .42, Math.max(lighting, story.wishGlow * .7));
   renderer.toneMappingExposure = 1.05 + 0.08 * fk;
   renderer.info.reset();
   composer.render();
