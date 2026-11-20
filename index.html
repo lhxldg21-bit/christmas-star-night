@@ -135,8 +135,20 @@ canvas{display:block;position:fixed;inset:0}
 .reply-sub{font-size:.95rem;line-height:1.9;color:#c3cbe8;margin:0 0 20px}
 .reply-row{display:flex;gap:16px;justify-content:center;align-items:center;flex-wrap:wrap}
 .reply-again{color:var(--amber-soft);text-decoration:none;border-bottom:1px dashed rgba(255,217,160,.5);font-size:.95rem}
+
+.wish-hint{position:absolute;bottom:max(20px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:.78rem;color:#ffdda1;pointer-events:none;text-shadow:0 2px 7px #050a22}
+.prompt[aria-describedby="wish-hint"]{touch-action:none;user-select:none}
+.letter-envelope{width:min(300px,calc(100vw - 48px));min-height:160px;text-align:center;padding:18px 24px 12px;color:#553946;background:linear-gradient(150deg,#f5e6cf,#d6bd9a);box-shadow:0 12px 40px #091126aa;border:1px solid #fbe8ca;border-radius:4px}
+.envelope-to{margin:0 0 12px;font-size:1rem;letter-spacing:.15em}
+.envelope-hint{font-size:.78rem;margin:10px 0 0}
+.letter-seal{width:50px;height:50px;border:2px solid #d88d79;border-radius:50%;background:#963f53;color:#ffdcaa;font-size:1.6rem;cursor:pointer;box-shadow:0 4px 0 #663043}
+.letter-seal:focus-visible{outline:3px solid #6a4252;outline-offset:4px}
+.wish-meter{position:absolute;width:min(192px,52vw);height:3px;left:50%;bottom:max(7vh,50px);transform:translateX(-50%);background:#3d314b;border-radius:4px;overflow:hidden;pointer-events:none}
+.wish-fill{height:100%;background:linear-gradient(90deg,#d58a59,#fff4c9);transform:scaleX(0);transform-origin:left}
+.letter-replies{margin-top:20px}
+.letter-replies .btn-ghost{color:#604157;border-color:#b59a8c}
 </style>
-  <script type="module" crossorigin src="./assets/index-Bn1-0SvS.js"></script>
+  <script type="module" crossorigin src="./assets/index-DBDfq7Fz.js"></script>
 </head>
 <body>
 <div id="hud"></div>
